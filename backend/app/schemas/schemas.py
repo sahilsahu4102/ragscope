@@ -47,6 +47,11 @@ class QueryRequest(BaseModel):
     use_reranker: bool = True
     use_hybrid: bool = True
     stream: bool = False
+    query_transform: str = Field(
+        default="none",
+        description="Query transformation: none | rewrite | hyde | decompose",
+    )
+    use_cache: bool = Field(default=True, description="Check semantic cache before pipeline")
 
 
 class Citation(BaseModel):
@@ -65,6 +70,8 @@ class QueryResponse(BaseModel):
     trace_id: str
     latency_ms: float
     tokens_used: Optional[int] = None
+    cached: bool = False
+    cache_similarity: Optional[float] = None
 
 
 # ── Retrieval Debug ───────────────────────────
@@ -78,6 +85,8 @@ class ChunkScore(BaseModel):
     sparse_score: Optional[float] = None
     rrf_score: Optional[float] = None
     rerank_score: Optional[float] = None
+    element_type: Optional[str] = None
+    page_number: Optional[int] = None
 
 
 class RetrieveRequest(BaseModel):
@@ -86,6 +95,8 @@ class RetrieveRequest(BaseModel):
     top_k: int = Field(default=20, ge=1, le=100)
     use_reranker: bool = True
     use_hybrid: bool = True
+    query_transform: str = Field(default="none", description="none | rewrite | hyde | decompose")
+    rrf_k: int = Field(default=60, ge=10, le=200, description="RRF constant")
 
 
 class RetrieveResponse(BaseModel):
