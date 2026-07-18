@@ -67,4 +67,5 @@ jobs:
           POSTGRES_DB: ragscope_test
           REDIS_URL: redis://localhost:6379/0
           OLLAMA_BASE_URL: http://localhost:11434
+          UPLOAD_DIR: /tmp/ragscope_uploads
         run: cd backend && pytest -v --tb=short

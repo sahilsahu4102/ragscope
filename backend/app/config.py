@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     gemini_embedding_model: str = "text-embedding-004"
 
     # ── Ingestion ─────────────────────────────
+    upload_dir: str = "/app/uploads"
     default_chunk_size: int = 512
     default_chunk_overlap: int = 50
     default_chunker: str = Field(

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db.session import get_db
 from app.models import Document
 from app.schemas.schemas import IngestResponse, IngestStatusResponse
@@ -20,8 +21,12 @@ from app.workers.ingest_task import ingest_document_task
 logger = structlog.get_logger()
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
-UPLOAD_DIR = Path("/app/uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+def _get_upload_dir() -> Path:
+    """Lazily create and return the upload directory."""
+    upload_dir = Path(settings.upload_dir)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    return upload_dir
 
 
 @router.post("", response_model=IngestResponse)
@@ -53,7 +58,7 @@ async def ingest_document(
     # Generate IDs
     document_id = uuid.uuid4()
     file_ext = Path(file.filename or "document").suffix or ".pdf"
-    save_path = UPLOAD_DIR / f"{document_id}{file_ext}"
+    save_path = _get_upload_dir() / f"{document_id}{file_ext}"
 
     # Save uploaded file to disk
     try:
