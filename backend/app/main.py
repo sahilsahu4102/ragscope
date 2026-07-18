@@ -27,7 +27,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Startup ───────────────────────────────
     logger.info("Starting RAGScope", env=settings.app_env)
     setup_logging(settings.log_level)
-    setup_tracing(settings.app_name)
+    setup_tracing(
+        settings.app_name,
+        sampling_rate=settings.trace_sampling_rate,
+        console_export=settings.trace_console_export,
+        otlp_endpoint=settings.otlp_endpoint,
+    )
     await init_db()
     logger.info("RAGScope ready", api_version="v1")
 

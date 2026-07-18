@@ -150,10 +150,10 @@ ragscope/
 ## Roadmap
 
 - [x] **Phase 0** — Scaffold & DevOps Foundation
-- [ ] **Phase 1** — MVP Vertical Slice (ingest → retrieve → generate → chat)
-- [ ] **Phase 2** — Advanced Retrieval (hybrid/RRF, reranking, caching)
-- [ ] **Phase 3** — Eval Harness (metrics, LLM judge, CI gates)
-- [ ] **Phase 4** — Observability & Experiments (traces, A/B, analytics)
+- [x] **Phase 1** — MVP Vertical Slice (ingest → retrieve → generate → chat)
+- [x] **Phase 2** — Advanced Retrieval (hybrid/RRF, reranking, caching)
+- [x] **Phase 3** — Eval Harness (metrics, LLM judge, CI gates)
+- [x] **Phase 4** — Observability & Experiments (traces, A/B, analytics)
 - [ ] **Phase 5** — Deploy, Guardrails, Benchmark Blog
 
 ## License

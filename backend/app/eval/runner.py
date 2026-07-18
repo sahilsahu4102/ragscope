@@ -190,24 +190,25 @@ class EvalRunner:
             retrieval_start = time.time()
             retrieved_chunks = await pipeline.retrieve(
                 query=question,
-                mode="hybrid" if config.get("use_hybrid") else "dense",
+                top_k=config.get("retrieval_top_k", settings.retrieval_top_k),
+                use_hybrid=config.get("use_hybrid", True),
                 use_reranker=config.get("use_reranker", True),
-                top_k=config.get("retrieval_top_k", 20),
-                rerank_top_k=config.get("rerank_top_k", 5),
-                rrf_k=config.get("rrf_k", 60),
+                query_transform=config.get("query_transform", "none"),
+                rrf_k=config.get("rrf_k", settings.rrf_k),
             )
             retrieval_latency = round((time.time() - retrieval_start) * 1000, 2)
 
             # 2. Generate answer
-            from app.generation.generator import GroundedGenerator
+            from app.generation.generator import Generator
 
-            generator = GroundedGenerator()
+            generator = Generator()
             generation_start = time.time()
 
             context_text = "\n\n".join(
                 f"[{i + 1}] {c['content']}" for i, c in enumerate(retrieved_chunks)
             )
-            generated_answer = await generator.generate(question, retrieved_chunks)
+            gen_result = await generator.generate(question, retrieved_chunks)
+            generated_answer = gen_result["answer"]
             generation_latency = round((time.time() - generation_start) * 1000, 2)
 
             # 3. Compute retrieval metrics
