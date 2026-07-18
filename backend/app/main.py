@@ -5,18 +5,18 @@ Factory pattern with lifespan events, CORS, versioned routers,
 structured logging, health probes, and OpenTelemetry bootstrap.
 """
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1 import router as v1_router
 from app.config import settings
 from app.db.session import engine, init_db
-from app.api.v1 import router as v1_router
-from app.observability.tracer import setup_tracing
 from app.observability.logging import setup_logging
+from app.observability.tracer import setup_tracing
 
 
 @asynccontextmanager

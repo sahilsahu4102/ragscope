@@ -6,7 +6,7 @@ All tables use UUID primary keys for distributed-safe IDs.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -14,10 +14,10 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
-    Index,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
@@ -26,7 +26,7 @@ from app.db.session import Base
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Document(Base):
@@ -65,12 +65,15 @@ class Chunk(Base):
         UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
     parent_id = Column(
-        UUID(as_uuid=True), ForeignKey("chunks.id", ondelete="SET NULL"), nullable=True,
+        UUID(as_uuid=True),
+        ForeignKey("chunks.id", ondelete="SET NULL"),
+        nullable=True,
         comment="Parent chunk ID for hierarchical chunking",
     )
     content = Column(Text, nullable=False)
     contextual_summary = Column(
-        Text, nullable=True,
+        Text,
+        nullable=True,
         comment="LLM-generated context prepended before embedding (Anthropic pattern)",
     )
     chunk_index = Column(Integer, nullable=False)
@@ -78,7 +81,8 @@ class Chunk(Base):
     embedding = Column(Vector(768), nullable=True)
     embedding_model = Column(String(100), nullable=True)
     element_type = Column(
-        String(50), nullable=True,
+        String(50),
+        nullable=True,
         comment="title | paragraph | table | list | image_caption",
     )
     metadata_ = Column("metadata", JSONB, nullable=True, default=dict)
@@ -105,7 +109,8 @@ class Query(Base):
     citations = Column(JSONB, nullable=True, comment="Structured citation objects")
     trace_id = Column(String(64), nullable=True, index=True)
     retrieval_scores = Column(
-        JSONB, nullable=True,
+        JSONB,
+        nullable=True,
         comment="Per-chunk scores: dense, sparse, rrf, rerank",
     )
     latency_ms = Column(Float, nullable=True)

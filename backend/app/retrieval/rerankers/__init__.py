@@ -1,10 +1,10 @@
 """RAGScope — Rerankers package."""
 
 from app.retrieval.rerankers.cross_encoder import (
-    get_reranker,
-    OllamaReranker,
-    CrossEncoderReranker,
     BaseReranker,
+    CrossEncoderReranker,
+    OllamaReranker,
+    get_reranker,
 )
 
-__all__ = ["get_reranker", "OllamaReranker", "CrossEncoderReranker", "BaseReranker"]
+__all__ = ["BaseReranker", "CrossEncoderReranker", "OllamaReranker", "get_reranker"]

@@ -7,6 +7,7 @@ Accepts file path and document_id, runs the full ingestion pipeline.
 
 import asyncio
 import uuid
+
 import structlog
 
 from app.workers.celery_app import celery_app
@@ -24,7 +25,7 @@ logger = structlog.get_logger()
 def ingest_document_task(self, file_path: str, document_id: str) -> dict:
     """
     Celery task: ingest a document through the full pipeline.
-    
+
     This runs in a Celery worker process, so we bootstrap an async event loop.
     """
     logger.info(
@@ -43,7 +44,7 @@ def ingest_document_task(self, file_path: str, document_id: str) -> dict:
             task_id=self.request.id,
             error=str(exc),
         )
-        raise self.retry(exc=exc)
+        raise self.retry(exc=exc) from exc
 
 
 async def _run_ingestion(file_path: str, document_id: str) -> dict:

@@ -8,13 +8,12 @@ All modes are switchable via request params for A/B experimentation.
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.observability.tracer import create_span, get_tracer
 from app.retrieval.dense import DenseRetriever
-from app.retrieval.sparse import SparseRetriever
 from app.retrieval.fusion import reciprocal_rank_fusion
-from app.retrieval.rerankers import get_reranker
 from app.retrieval.query_transform import QueryTransformer
-from app.observability.tracer import get_tracer, create_span
+from app.retrieval.rerankers import get_reranker
+from app.retrieval.sparse import SparseRetriever
 
 logger = structlog.get_logger()
 tracer = get_tracer("retrieval")
@@ -61,18 +60,28 @@ class RetrievalPipeline:
         Returns:
             Ranked list of chunk dicts with scores from each stage.
         """
-        with create_span(tracer, "retrieval_pipeline", "CHAIN", {
-            "retrieval.mode": "hybrid" if use_hybrid else "dense",
-            "retrieval.use_reranker": use_reranker,
-            "retrieval.query_transform": query_transform,
-            "retrieval.top_k": top_k,
-            "retrieval.rrf_k": rrf_k,
-        }):
+        with create_span(
+            tracer,
+            "retrieval_pipeline",
+            "CHAIN",
+            {
+                "retrieval.mode": "hybrid" if use_hybrid else "dense",
+                "retrieval.use_reranker": use_reranker,
+                "retrieval.query_transform": query_transform,
+                "retrieval.top_k": top_k,
+                "retrieval.rrf_k": rrf_k,
+            },
+        ):
             # ── 1. Query transformation ──────────────
             if query_transform != "none":
-                with create_span(tracer, "query_transform", "CHAIN", {
-                    "transform.method": query_transform,
-                }):
+                with create_span(
+                    tracer,
+                    "query_transform",
+                    "CHAIN",
+                    {
+                        "transform.method": query_transform,
+                    },
+                ):
                     transformed = await self.query_transformer.transform(
                         query, method=query_transform
                     )
@@ -122,10 +131,10 @@ class RetrievalPipeline:
                 candidates = candidates[:top_k]
 
             # Log pipeline results
-            mode = "hybrid+rerank" if (use_hybrid and use_reranker) else (
-                "hybrid" if use_hybrid else (
-                    "dense+rerank" if use_reranker else "dense"
-                )
+            mode = (
+                "hybrid+rerank"
+                if (use_hybrid and use_reranker)
+                else ("hybrid" if use_hybrid else ("dense+rerank" if use_reranker else "dense"))
             )
 
             logger.info(
@@ -136,7 +145,9 @@ class RetrievalPipeline:
                 top_score=candidates[0].get(
                     "rerank_score",
                     candidates[0].get("rrf_score", candidates[0].get("dense_score", 0)),
-                ) if candidates else 0,
+                )
+                if candidates
+                else 0,
             )
 
             return candidates

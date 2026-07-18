@@ -5,17 +5,16 @@ Layout-aware PDF parsing with fallback chain: PyMuPDF → plain text extraction.
 Preserves element types (titles, paragraphs, tables) and page structure.
 """
 
-import structlog
 from pathlib import Path
-from typing import Optional
 
 import fitz  # PyMuPDF
+import structlog
 
 from app.ingestion.parsers.base import (
     BaseParser,
+    ElementType,
     ParsedDocument,
     ParsedElement,
-    ElementType,
 )
 
 logger = structlog.get_logger()
@@ -24,7 +23,7 @@ logger = structlog.get_logger()
 class PDFParser(BaseParser):
     """
     PDF parser using PyMuPDF with layout-aware element extraction.
-    
+
     Extracts text blocks with position info, classifies them by font size
     into titles/headings/paragraphs, and preserves reading order.
     """
@@ -69,7 +68,7 @@ class PDFParser(BaseParser):
         heading_threshold = avg_size * 1.15
 
         # Second pass: extract elements with classification
-        current_section: Optional[str] = None
+        current_section: str | None = None
 
         for page_num, page in enumerate(doc, 1):
             blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
@@ -103,21 +102,25 @@ class PDFParser(BaseParser):
                     else:
                         el_type = ElementType.PARAGRAPH
 
-                    elements.append(ParsedElement(
-                        content=block_text,
-                        element_type=el_type,
-                        page_number=page_num,
-                        section_path=current_section,
-                        metadata={"font_size": max_font_size, "is_bold": is_bold},
-                    ))
+                    elements.append(
+                        ParsedElement(
+                            content=block_text,
+                            element_type=el_type,
+                            page_number=page_num,
+                            section_path=current_section,
+                            metadata={"font_size": max_font_size, "is_bold": is_bold},
+                        )
+                    )
 
                 elif block.get("type") == 1:  # Image block
-                    elements.append(ParsedElement(
-                        content="[Image]",
-                        element_type=ElementType.IMAGE_CAPTION,
-                        page_number=page_num,
-                        section_path=current_section,
-                    ))
+                    elements.append(
+                        ParsedElement(
+                            content="[Image]",
+                            element_type=ElementType.IMAGE_CAPTION,
+                            page_number=page_num,
+                            section_path=current_section,
+                        )
+                    )
 
         page_count = len(doc)
         doc.close()
@@ -144,11 +147,13 @@ class PDFParser(BaseParser):
         for page_num, page in enumerate(doc, 1):
             text = page.get_text("text").strip()
             if text:
-                elements.append(ParsedElement(
-                    content=text,
-                    element_type=ElementType.PARAGRAPH,
-                    page_number=page_num,
-                ))
+                elements.append(
+                    ParsedElement(
+                        content=text,
+                        element_type=ElementType.PARAGRAPH,
+                        page_number=page_num,
+                    )
+                )
 
         page_count = len(doc)
         doc.close()

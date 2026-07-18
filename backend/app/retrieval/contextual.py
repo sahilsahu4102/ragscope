@@ -11,12 +11,12 @@ because chunks carry their own context instead of losing it during splitting.
 Reference: Anthropic, "Introducing Contextual Retrieval" (Sep 2024)
 """
 
-import structlog
 import httpx
+import structlog
 
 from app.config import settings
 from app.ingestion.chunkers.recursive_chunker import TextChunk
-from app.observability.tracer import get_tracer, create_span
+from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
 tracer = get_tracer("ingestion")
@@ -62,9 +62,14 @@ class ContextualEnricher:
         Returns:
             Enriched chunks with preamble prepended to content
         """
-        with create_span(tracer, "contextual_enrichment", "CHAIN", {
-            "enrichment.chunk_count": len(chunks),
-        }):
+        with create_span(
+            tracer,
+            "contextual_enrichment",
+            "CHAIN",
+            {
+                "enrichment.chunk_count": len(chunks),
+            },
+        ):
             # Truncate document to fit in context window
             max_doc_length = 8000
             doc_preview = full_document_text[:max_doc_length]
@@ -135,10 +140,7 @@ class ContextualEnricher:
             logger.info(
                 "Contextual enrichment complete",
                 total_chunks=len(enriched_chunks),
-                enriched=sum(
-                    1 for c in enriched_chunks
-                    if c.metadata.get("contextual_enrichment")
-                ),
+                enriched=sum(1 for c in enriched_chunks if c.metadata.get("contextual_enrichment")),
             )
 
             return enriched_chunks

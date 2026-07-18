@@ -5,11 +5,10 @@ Endpoints for document upload and ingestion job status.
 """
 
 import uuid
-import shutil
-import structlog
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+import structlog
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,10 +31,10 @@ async def ingest_document(
 ):
     """
     Upload a document for ingestion.
-    
+
     Accepts PDF files, saves to disk, and dispatches a Celery task
     for async processing (parse → chunk → embed → store).
-    
+
     Returns a job_id (Celery task ID) and document_id for tracking.
     """
     # Validate file type
@@ -103,7 +102,7 @@ async def get_ingest_status(
 ):
     """
     Check the status of an ingestion job.
-    
+
     Returns the Celery task status and document details.
     """
     from celery.result import AsyncResult
@@ -118,6 +117,7 @@ async def get_ingest_status(
 
         # Count chunks created
         from app.models import Chunk
+
         chunk_count_result = await db.execute(
             select(Chunk).where(Chunk.document_id == uuid.UUID(doc_id))
         )
