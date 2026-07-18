@@ -1,0 +1,26 @@
+name: Eval Regression Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/app/retrieval/**"
+      - "backend/app/generation/**"
+      - "backend/app/ingestion/**"
+
+jobs:
+  eval-gate:
+    name: Eval Regression Check
+    runs-on: ubuntu-latest
+    # TODO: Phase 3 — Implement eval runner + threshold assertions
+    # This workflow will:
+    #   1. Spin up services (Postgres, Redis, Ollama)
+    #   2. Ingest the golden dataset
+    #   3. Run eval metrics (faithfulness, context_recall, NDCG@10)
+    #   4. Assert thresholds: faithfulness >= 0.80, context_recall >= 0.70
+    #   5. Post metric summary as PR comment
+    #   6. Fail the PR if any metric drops below threshold
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder
+        run: echo "Eval regression gate — will be implemented in Phase 3"
