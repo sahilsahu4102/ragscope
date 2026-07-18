@@ -97,6 +97,53 @@ class EvalRun(Base):
     __table_args__ = (Index("ix_eval_runs_dataset_id", "dataset_id"),)
 
 
+class Experiment(Base):
+    """An A/B experiment comparing two configs on the same dataset.
+
+    Runs the eval pipeline once per config (variant A vs variant B) and stores
+    the per-metric deltas with a heuristic significance flag.
+    """
+
+    __tablename__ = "experiments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    dataset_id = Column(
+        UUID(as_uuid=True), ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False
+    )
+
+    status = Column(
+        String(20),
+        nullable=False,
+        default="pending",
+        comment="pending | running | completed | failed",
+    )
+
+    # ── Variant configs (config_overrides for the eval runner) ────
+    config_a = Column(JSONB, nullable=False, default=dict, comment="Variant A config")
+    config_b = Column(JSONB, nullable=False, default=dict, comment="Variant B config")
+
+    # ── Links to the two eval runs produced ──────────────────────
+    run_a_id = Column(UUID(as_uuid=True), nullable=True)
+    run_b_id = Column(UUID(as_uuid=True), nullable=True)
+
+    # ── Results ──────────────────────────────────────────────────
+    metrics_a = Column(JSONB, nullable=True, comment="Aggregate metrics for variant A")
+    metrics_b = Column(JSONB, nullable=True, comment="Aggregate metrics for variant B")
+    deltas = Column(
+        JSONB,
+        nullable=True,
+        comment="Per-metric {delta, pct_change, winner, significant} objects",
+    )
+
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("ix_experiments_dataset_id", "dataset_id"),)
+
+
 class EvalSample(Base):
     """Per-question results within an eval run."""
 

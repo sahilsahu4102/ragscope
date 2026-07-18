@@ -11,13 +11,15 @@ import uuid
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from opentelemetry import trace as otel_trace
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.caching.semantic_cache import SemanticCache
 from app.db.session import get_db
 from app.generation.generator import Generator
 from app.models import Query as QueryModel
-from app.observability.tracer import create_span, get_tracer
+from app.observability.collector import persist_trace
+from app.observability.tracer import create_span, get_current_trace_id, get_tracer
 from app.retrieval.pipeline import RetrievalPipeline
 from app.schemas.schemas import Citation, QueryRequest, QueryResponse
 
@@ -45,7 +47,7 @@ async def query_rag(
       5. Cache result for future similar queries
     """
     start = time.perf_counter()
-    trace_id = uuid.uuid4().hex[:16]
+    query_id: str | None = None
 
     with create_span(
         tracer,
@@ -53,11 +55,14 @@ async def query_rag(
         "CHAIN",
         {
             "query.text": request.question,
-            "query.trace_id": trace_id,
             "query.use_cache": request.use_cache,
             "query.query_transform": request.query_transform,
         },
     ):
+        # Adopt the live OTel trace id so persisted spans link to this response.
+        trace_id = get_current_trace_id() or uuid.uuid4().hex[:16]
+        otel_trace.get_current_span().set_attribute("query.trace_id", trace_id)
+
         # ── 0. Semantic cache check ───────────────
         if request.use_cache:
             cached = await _semantic_cache.get(request.question)
@@ -121,6 +126,7 @@ async def query_rag(
             ],
             latency_ms=round(latency_ms, 1),
             total_tokens=result.get("tokens_used"),
+            total_cost_usd=result.get("cost_usd"),
             config_snapshot={
                 "top_k": request.top_k,
                 "use_hybrid": request.use_hybrid,
@@ -131,6 +137,8 @@ async def query_rag(
         )
         db.add(query_record)
         await db.commit()
+        await db.refresh(query_record)
+        query_id = str(query_record.id)
 
         # ── 4. Cache the result ───────────────────
         if request.use_cache:
@@ -149,13 +157,17 @@ async def query_rag(
             citations=len(result["citations"]),
         )
 
-        return QueryResponse(
+        response = QueryResponse(
             answer=result["answer"],
             citations=[Citation(**c) for c in result["citations"]],
             trace_id=trace_id,
             latency_ms=round(latency_ms, 1),
             tokens_used=result.get("tokens_used"),
         )
+
+    # Persist the full span tree after the root span has ended.
+    await persist_trace(db, trace_id, query_id=query_id)
+    return response
 
 
 @router.post("/stream")

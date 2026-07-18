@@ -11,8 +11,10 @@ from collections.abc import AsyncGenerator
 
 import httpx
 import structlog
+from opentelemetry import trace as otel_trace
 
 from app.config import settings
+from app.observability.cost import calculate_cost
 from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
@@ -105,6 +107,18 @@ class Generator:
                 response.raise_for_status()
                 data = response.json()
 
+            # Attach token usage + cost to the LLM span for trace/analytics.
+            input_tokens = data.get("prompt_eval_count", 0)
+            output_tokens = data.get("eval_count", 0)
+            otel_trace.get_current_span().set_attributes(
+                {
+                    "gen_ai.usage.input_tokens": input_tokens,
+                    "gen_ai.usage.output_tokens": output_tokens,
+                    "gen_ai.usage.total_tokens": input_tokens + output_tokens,
+                    "cost.usd": calculate_cost(self.model, input_tokens, output_tokens),
+                }
+            )
+
         latency_ms = (time.perf_counter() - start) * 1000
         answer = data.get("response", "")
         total_tokens = data.get("eval_count", 0) + data.get("prompt_eval_count", 0)
@@ -124,6 +138,11 @@ class Generator:
             "answer": answer,
             "citations": citations,
             "tokens_used": total_tokens,
+            "cost_usd": calculate_cost(
+                self.model,
+                data.get("prompt_eval_count", 0),
+                data.get("eval_count", 0),
+            ),
             "latency_ms": round(latency_ms, 1),
         }
 

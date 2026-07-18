@@ -38,6 +38,10 @@ class SemanticCache:
     """
 
     CACHE_PREFIX = "ragscope:semantic_cache"
+    # Metrics live under a separate prefix so entry globs + invalidation
+    # never touch the hit/miss counters.
+    HITS_KEY = "ragscope:cache_metrics:hits"
+    MISSES_KEY = "ragscope:cache_metrics:misses"
 
     def __init__(
         self,
@@ -83,6 +87,7 @@ class SemanticCache:
                 # Get all cached entries
                 keys = await r.keys(f"{self.CACHE_PREFIX}:*")
                 if not keys:
+                    await r.incr(self.MISSES_KEY)
                     return None
 
                 best_match: dict | None = None
@@ -112,6 +117,7 @@ class SemanticCache:
                         similarity=round(best_similarity, 4),
                         cached_query=best_match.get("query", "")[:80],
                     )
+                    await r.incr(self.HITS_KEY)
                     return {
                         "answer": best_match["answer"],
                         "citations": best_match.get("citations", []),
@@ -125,6 +131,7 @@ class SemanticCache:
                     best_similarity=round(best_similarity, 4),
                     threshold=self.threshold,
                 )
+                await r.incr(self.MISSES_KEY)
                 return None
 
             except Exception as e:
@@ -185,14 +192,28 @@ class SemanticCache:
             return 0
 
     async def stats(self) -> dict:
-        """Return cache statistics."""
+        """Return cache statistics including hit/miss counters and hit rate."""
         try:
             r = await self._get_redis()
             keys = await r.keys(f"{self.CACHE_PREFIX}:*")
+            hits = int(await r.get(self.HITS_KEY) or 0)
+            misses = int(await r.get(self.MISSES_KEY) or 0)
+            total = hits + misses
+            hit_rate = round(hits / total, 4) if total else 0.0
             return {
                 "entries": len(keys),
+                "hits": hits,
+                "misses": misses,
+                "hit_rate": hit_rate,
                 "threshold": self.threshold,
                 "ttl_seconds": self.ttl,
             }
         except Exception:
-            return {"entries": 0, "threshold": self.threshold, "ttl_seconds": self.ttl}
+            return {
+                "entries": 0,
+                "hits": 0,
+                "misses": 0,
+                "hit_rate": 0.0,
+                "threshold": self.threshold,
+                "ttl_seconds": self.ttl,
+            }

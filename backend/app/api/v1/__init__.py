@@ -6,11 +6,15 @@ Aggregates all v1 endpoint routers.
 
 from fastapi import APIRouter
 
+from app.api.v1.analytics import router as analytics_router
 from app.api.v1.datasets import router as datasets_router
 from app.api.v1.evaluate import router as evaluate_router
+from app.api.v1.experiments import router as experiments_router
+from app.api.v1.feedback import router as feedback_router
 from app.api.v1.ingest import router as ingest_router
 from app.api.v1.query import router as query_router
 from app.api.v1.retrieve import router as retrieve_router
+from app.api.v1.traces import router as traces_router
 
 router = APIRouter(tags=["v1"])
 
@@ -20,6 +24,10 @@ router.include_router(query_router)
 router.include_router(retrieve_router)
 router.include_router(datasets_router)
 router.include_router(evaluate_router)
+router.include_router(experiments_router)
+router.include_router(traces_router)
+router.include_router(feedback_router)
+router.include_router(analytics_router)
 
 
 @router.get("/")

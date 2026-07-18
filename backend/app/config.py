@@ -83,5 +83,21 @@ class Settings(BaseSettings):
     eval_context_precision_threshold: float = 0.60
     eval_judge_model: str = ""  # Empty = use ollama_model
 
+    # ── Observability / Tracing ──────────────────
+    trace_sampling_rate: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of traces persisted to Postgres (1.0 = all)",
+    )
+    trace_console_export: bool = Field(
+        default=False,
+        description="Also print spans to stdout (dev debugging)",
+    )
+    otlp_endpoint: str = Field(
+        default="",
+        description="Optional OTLP HTTP endpoint to forward spans to",
+    )
+
 
 settings = Settings()
