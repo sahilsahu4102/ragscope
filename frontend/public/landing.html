@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>RAGScope | Precision AI Infrastructure</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-highest": "#2f3633",
+                        "outline-variant": "#3b4a44",
+                        "on-surface-variant": "#bacac2",
+                        "on-primary-fixed": "#002118",
+                        "inverse-surface": "#dce4df",
+                        "on-error": "#690005",
+                        "error": "#ffb4ab",
+                        "primary": "#46f1c5",
+                        "surface-container-low": "#161d1a",
+                        "tertiary-fixed": "#ffdcc1",
+                        "tertiary-fixed-dim": "#ffb77a",
+                        "primary-container": "#00d4aa",
+                        "tertiary": "#ffcea6",
+                        "on-tertiary": "#4c2700",
+                        "outline": "#85948d",
+                        "secondary-container": "#00b2d6",
+                        "on-primary-container": "#005643",
+                        "tertiary-container": "#ffa858",
+                        "surface-container": "#19211e",
+                        "secondary-fixed-dim": "#4cd6fb",
+                        "inverse-on-surface": "#2a322f",
+                        "secondary": "#4cd6fb",
+                        "background": "#0d1512",
+                        "surface-bright": "#333b37",
+                        "surface": "#0d1512",
+                        "surface-container-lowest": "#08100d",
+                        "secondary-fixed": "#b3ebff",
+                        "surface-dim": "#0d1512",
+                        "surface-variant": "#2f3633",
+                        "on-tertiary-fixed-variant": "#6c3a00",
+                        "on-secondary-fixed-variant": "#004e5f",
+                        "surface-tint": "#28dfb5",
+                        "primary-fixed": "#55fcd0",
+                        "on-secondary-fixed": "#001f27",
+                        "on-secondary": "#003642",
+                        "on-error-container": "#ffdad6",
+                        "on-primary-fixed-variant": "#00513f",
+                        "on-background": "#dce4df",
+                        "on-tertiary-container": "#733e00",
+                        "on-tertiary-fixed": "#2e1500",
+                        "inverse-primary": "#006b55",
+                        "surface-container-high": "#242c28",
+                        "on-surface": "#dce4df",
+                        "on-primary": "#00382b",
+                        "on-secondary-container": "#003f4e",
+                        "primary-fixed-dim": "#28dfb5",
+                        "error-container": "#93000a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "stack-md": "16px",
+                        "stack-sm": "8px",
+                        "unit": "4px",
+                        "margin-desktop": "48px",
+                        "stack-lg": "32px",
+                        "gutter": "24px",
+                        "container-max": "1440px",
+                        "margin-mobile": "16px"
+                    },
+                    "fontFamily": {
+                        "headline-md": ["Inter"],
+                        "body-md": ["Inter"],
+                        "caption": ["Inter"],
+                        "label-mono": ["JetBrains Mono"],
+                        "display-lg-mobile": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "display-lg": ["Inter"]
+                    },
+                    "fontSize": {
+                        "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                        "caption": ["12px", {"lineHeight": "16px", "letterSpacing": "0.01em", "fontWeight": "500"}],
+                        "label-mono": ["14px", {"lineHeight": "20px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                        "display-lg-mobile": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "700"}],
+                        "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                        "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            background-color: #0A0F1C;
+            color: #dce4df;
+            scroll-behavior: smooth;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.04);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .glowing-border-teal {
+            box-shadow: 0 0 15px rgba(0, 212, 170, 0.2);
+            border: 1px solid rgba(0, 212, 170, 0.5);
+        }
+        .text-glow-teal {
+            text-shadow: 0 0 20px rgba(0, 212, 170, 0.4);
+        }
+        .ai-pulse {
+            position: relative;
+        }
+        .ai-pulse::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #00D4AA, transparent);
+            animation: pulse-line 2s infinite linear;
+        }
+        @keyframes pulse-line {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        .line-connector {
+            background: linear-gradient(90deg, #00D4AA 0%, #00B4D8 100%);
+            height: 2px;
+            box-shadow: 0 0 10px rgba(0, 212, 170, 0.5);
+        }
+    </style>
+</head>
+<body class="font-body-md text-body-md overflow-x-hidden">
+<!-- TopNavBar -->
+<nav class="fixed top-0 w-full z-50 bg-background/80 dark:bg-background/80 backdrop-blur-xl border-b border-white/10 shadow-sm">
+<div class="flex justify-between items-center px-margin-desktop py-4 max-w-container-max mx-auto w-full">
+<div class="font-headline-md text-headline-md font-bold text-on-surface dark:text-on-surface tracking-tighter">
+                RAGScope
+            </div>
+<div class="hidden md:flex gap-gutter items-center">
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-primary transition-colors" href="#features">Features</a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-primary transition-colors" href="#architecture">Architecture</a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-primary transition-colors" href="#benchmarks">Benchmarks</a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-primary transition-colors" href="#docs">Docs</a>
+</div>
+<div class="flex items-center gap-stack-md">
+<button class="text-on-surface-variant hover:opacity-80 transition-all font-body-md">Login</button>
+<button class="bg-primary-container text-on-primary-container px-6 py-2 rounded-lg font-bold hover:opacity-90 transition-all shadow-[0_0_15px_rgba(0,212,170,0.3)]">Get Started</button>
+</div>
+</div>
+</nav>
+<!-- Hero Section -->
+<header class="relative min-h-screen flex items-center justify-center pt-24 overflow-hidden">
+<!-- STITCH_SHADER_START:ANIMATION_2 class="absolute inset-0 w-full h-full opacity-60" -->
+<div class="absolute inset-0 w-full h-full opacity-60" style="display:block;">
+<canvas id="shader-canvas-ANIMATION_2" style="display:block;width:100%;height:100%"></canvas>
+<script>
+(function() {
+  const canvas = document.getElementById('shader-canvas-ANIMATION_2');
+
+  // Sync the WebGL drawing-buffer size with the CSS-driven layout size.
+  // This fires on initial layout and whenever the element is resized.
+  function syncSize() {
+    const w = canvas.clientWidth  || 1280;
+    const h = canvas.clientHeight || 720;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width  = w;
+      canvas.height = h;
+    }
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(syncSize).observe(canvas);
+  }
+  syncSize();
+
+  const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+  if (!gl) return;
+  const vs = `attribute vec2 a_position;
+varying vec2 v_texCoord;
+void main() {
+  v_texCoord = a_position * 0.5 + 0.5;
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}`;
+  const fs = `precision highp float;
+uniform float u_time;
+uniform vec2 u_resolution;
+
+varying vec2 v_texCoord;
+
+void main() {
+    vec2 uv = v_texCoord;
+    
+    // Create a flowing gradient mesh using noise-like sine waves
+    // Colors based on user palette: Dark Navy (#0A0F1C), Teal (#00D4AA), Cyan (#00B4D8)
+    vec3 color1 = vec3(0.039, 0.059, 0.110); // Dark Navy
+    vec3 color2 = vec3(0.0, 0.831, 0.667);  // Teal
+    vec3 color3 = vec3(0.0, 0.706, 0.847);  // Cyan
+    
+    float t = u_time * 0.5;
+    
+    // Layer 1: Flowing waves
+    float noise1 = sin(uv.x * 3.0 + t) * cos(uv.y * 2.0 - t * 0.8);
+    float noise2 = sin(uv.y * 4.0 + t * 1.2) * cos(uv.x * 3.5 + t);
+    
+    // Mix colors based on noise patterns
+    vec3 color = mix(color1, color2, clamp(noise1 * 0.5 + 0.5, 0.0, 1.0));
+    color = mix(color, color3, clamp(noise2 * 0.4 + 0.4, 0.0, 1.0));
+    
+    // Add a dark vignette to focus on the center headline area
+    float vignette = 1.0 - length(uv - 0.5) * 1.2;
+    color *= clamp(vignette, 0.5, 1.0);
+    
+    gl_FragColor = vec4(color, 1.0);
+}`;
+  function cs(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    return s;
+  }
+  const prog = gl.createProgram();
+  gl.attachShader(prog, cs(gl.VERTEX_SHADER, vs));
+  gl.attachShader(prog, cs(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(prog);
+  gl.useProgram(prog);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  const pos = gl.getAttribLocation(prog, 'a_position');
+  gl.enableVertexAttribArray(pos);
+  gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+  const uTime = gl.getUniformLocation(prog, 'u_time');
+  const uRes = gl.getUniformLocation(prog, 'u_resolution');
+  const uMouse = gl.getUniformLocation(prog, 'u_mouse');
+
+  // u_mouse is in pixel coordinates matching u_resolution (ShaderToy convention).
+  // Shaders that need normalized coords should use: u_mouse / u_resolution.
+  let mouse = { x: canvas.width / 2, y: canvas.height / 2 };
+  window.addEventListener('mousemove', (event) => {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width && rect.height) {
+      const nx = (event.clientX - rect.left) / rect.width;
+      const ny = 1.0 - (event.clientY - rect.top) / rect.height;
+      mouse.x = nx * canvas.width;
+      mouse.y = ny * canvas.height;
+    }
+  });
+
+  function render(t) {
+    if (typeof ResizeObserver === 'undefined') syncSize();
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    if (uTime) gl.uniform1f(uTime, t * 0.001);
+    if (uRes) gl.uniform2f(uRes, canvas.width, canvas.height);
+    if (uMouse) gl.uniform2f(uMouse, mouse.x, mouse.y);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    requestAnimationFrame(render);
+  }
+  render(0);
+})();
+</script>
+</div>
+<!-- STITCH_SHADER_END:ANIMATION_2 -->
+<div class="relative z-10 text-center px-margin-mobile md:px-margin-desktop max-w-4xl mx-auto">
+<h1 class="font-display-lg text-[64px] md:text-[96px] leading-tight font-extrabold tracking-tighter text-on-surface mb-stack-md text-glow-teal">
+                RAGScope
+            </h1>
+<p class="font-body-lg text-body-lg md:text-2xl text-on-surface-variant mb-stack-lg max-w-2xl mx-auto">
+                Self-Hosted Intelligence. Production-Grade RAG. Build, monitor, and scale enterprise AI retrieval without the vendor lock-in.
+            </p>
+<div class="flex flex-col md:flex-row gap-gutter justify-center items-center">
+<button class="bg-primary-container text-on-primary-container px-10 py-4 rounded-xl font-bold text-lg hover:scale-105 transition-transform shadow-[0_0_25px_rgba(0,212,170,0.5)] glowing-border-teal">
+                    Get Started
+                </button>
+<button class="glass-panel text-on-surface px-10 py-4 rounded-xl font-bold text-lg hover:bg-white/10 transition-colors border-outline-variant">
+                    View Demo
+                </button>
+</div>
+</div>
+</header>
+<!-- Metrics Section -->
+<section class="py-stack-lg relative z-20">
+<div class="max-w-container-max mx-auto px-margin-desktop grid grid-cols-1 md:grid-cols-3 gap-gutter">
+<div class="glass-panel p-stack-lg rounded-xl flex flex-col items-center text-center">
+<span class="text-primary font-display-lg text-display-lg-mobile md:text-display-lg mb-2">150ms</span>
+<span class="font-label-mono text-label-mono text-on-surface-variant uppercase tracking-widest">End-to-End Latency</span>
+</div>
+<div class="glass-panel p-stack-lg rounded-xl flex flex-col items-center text-center glowing-border-teal">
+<span class="text-primary font-display-lg text-display-lg-mobile md:text-display-lg mb-2">99%</span>
+<span class="font-label-mono text-label-mono text-on-surface-variant uppercase tracking-widest">Top-K Recall Rate</span>
+</div>
+<div class="glass-panel p-stack-lg rounded-xl flex flex-col items-center text-center">
+<span class="text-primary font-display-lg text-display-lg-mobile md:text-display-lg mb-2">50%</span>
+<span class="font-label-mono text-label-mono text-on-surface-variant uppercase tracking-widest">Token Cost Savings</span>
+</div>
+</div>
+</section>
+<!-- Features Bento Grid -->
+<section class="py-stack-lg relative" id="features">
+<div class="max-w-container-max mx-auto px-margin-desktop">
+<div class="mb-stack-lg">
+<h2 class="font-headline-md text-headline-md text-primary mb-2">Capabilities</h2>
+<p class="text-on-surface-variant max-w-xl">Deep-stack features for architects who refuse to compromise on quality or security.</p>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-gutter">
+<!-- Feature 1 -->
+<div class="glass-panel p-stack-lg rounded-xl hover:bg-white/10 transition-all group">
+<div class="w-12 h-12 bg-secondary/10 flex items-center justify-center rounded-lg mb-stack-md text-secondary border border-secondary/20">
+<span class="material-symbols-outlined">hub</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">Hybrid Search</h3>
+<p class="text-on-surface-variant">Seamlessly combine BM25 keyword matching with dense vector retrieval for robust semantic relevance.</p>
+</div>
+<!-- Feature 2 -->
+<div class="glass-panel p-stack-lg rounded-xl hover:bg-white/10 transition-all ai-pulse">
+<div class="w-12 h-12 bg-primary/10 flex items-center justify-center rounded-lg mb-stack-md text-primary border border-primary/20">
+<span class="material-symbols-outlined">filter_alt</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">Cross-Encoder Reranking</h3>
+<p class="text-on-surface-variant">Verify retrieval with state-of-the-art reranking models to eliminate irrelevant noise from LLM contexts.</p>
+</div>
+<!-- Feature 3 -->
+<div class="glass-panel p-stack-lg rounded-xl hover:bg-white/10 transition-all">
+<div class="w-12 h-12 bg-secondary/10 flex items-center justify-center rounded-lg mb-stack-md text-secondary border border-secondary/20">
+<span class="material-symbols-outlined">gavel</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">LLM-as-Judge Eval</h3>
+<p class="text-on-surface-variant">Automated quality scoring using GPT-4o or local Llama3 to measure faithfulness and answer relevancy.</p>
+</div>
+<!-- Feature 4 -->
+<div class="glass-panel p-stack-lg rounded-xl hover:bg-white/10 transition-all">
+<div class="w-12 h-12 bg-primary/10 flex items-center justify-center rounded-lg mb-stack-md text-primary border border-primary/20">
+<span class="material-symbols-outlined">monitoring</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">OpenTelemetry Tracing</h3>
+<p class="text-on-surface-variant">Native OTel integration. Track every embedding call and LLM generation with industry-standard observability.</p>
+</div>
+<!-- Feature 5 -->
+<div class="glass-panel p-stack-lg rounded-xl hover:bg-white/10 transition-all">
+<div class="w-12 h-12 bg-secondary/10 flex items-center justify-center rounded-lg mb-stack-md text-secondary border border-secondary/20">
+<span class="material-symbols-outlined">memory</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">Semantic Caching</h3>
+<p class="text-on-surface-variant">Reduce LLM costs by caching semantically similar queries. Millisecond response times for repeat knowledge.</p>
+</div>
+<!-- Feature 6 -->
+<div class="glass-panel p-stack-lg rounded-xl hover:bg-white/10 transition-all">
+<div class="w-12 h-12 bg-primary/10 flex items-center justify-center rounded-lg mb-stack-md text-primary border border-primary/20">
+<span class="material-symbols-outlined">security</span>
+</div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-2">CI Regression Gates</h3>
+<p class="text-on-surface-variant">Fail deployments automatically if recall drops or latency spikes in your production-bound RAG pipelines.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Architecture Section -->
+<section class="py-stack-lg bg-surface-container-lowest/50 relative overflow-hidden" id="architecture">
+<div class="max-w-container-max mx-auto px-margin-desktop">
+<div class="text-center mb-stack-lg">
+<h2 class="font-headline-md text-headline-md text-on-surface">The RAGScope Pipeline</h2>
+<p class="text-on-surface-variant">Optimized for horizontal scaling and data integrity</p>
+</div>
+<div class="relative flex flex-col md:flex-row items-center justify-between gap-gutter">
+<!-- Connector Line Background (Desktop) -->
+<div class="hidden md:block absolute top-1/2 left-0 w-full h-[2px] line-connector -translate-y-1/2 opacity-20 z-0"></div>
+<!-- Pipeline Steps -->
+<div class="flex flex-col items-center z-10 group">
+<div class="w-20 h-20 glass-panel rounded-full flex items-center justify-center mb-4 text-primary group-hover:scale-110 transition-transform bg-background shadow-[0_0_20px_rgba(0,212,170,0.2)]">
+<span class="material-symbols-outlined text-3xl">description</span>
+</div>
+<span class="font-label-mono text-label-mono text-primary">Document</span>
+</div>
+<div class="flex flex-col items-center z-10 group">
+<div class="w-20 h-20 glass-panel rounded-full flex items-center justify-center mb-4 text-secondary group-hover:scale-110 transition-transform bg-background">
+<span class="material-symbols-outlined text-3xl">account_tree</span>
+</div>
+<span class="font-label-mono text-label-mono text-secondary">Parse</span>
+</div>
+<div class="flex flex-col items-center z-10 group">
+<div class="w-20 h-20 glass-panel rounded-full flex items-center justify-center mb-4 text-primary group-hover:scale-110 transition-transform bg-background shadow-[0_0_20px_rgba(0,212,170,0.2)]">
+<span class="material-symbols-outlined text-3xl">grid_view</span>
+</div>
+<span class="font-label-mono text-label-mono text-primary">Chunk</span>
+</div>
+<div class="flex flex-col items-center z-10 group">
+<div class="w-20 h-20 glass-panel rounded-full flex items-center justify-center mb-4 text-secondary group-hover:scale-110 transition-transform bg-background">
+<span class="material-symbols-outlined text-3xl">scatter_plot</span>
+</div>
+<span class="font-label-mono text-label-mono text-secondary">Embed</span>
+</div>
+<div class="flex flex-col items-center z-10 group">
+<div class="w-20 h-20 glass-panel rounded-full flex items-center justify-center mb-4 text-primary group-hover:scale-110 transition-transform bg-background shadow-[0_0_20px_rgba(0,212,170,0.2)]">
+<span class="material-symbols-outlined text-3xl">database</span>
+</div>
+<span class="font-label-mono text-label-mono text-primary">Retrieve</span>
+</div>
+<div class="flex flex-col items-center z-10 group">
+<div class="w-20 h-20 glass-panel rounded-full flex items-center justify-center mb-4 text-secondary group-hover:scale-110 transition-transform bg-background">
+<span class="material-symbols-outlined text-3xl">psychology</span>
+</div>
+<span class="font-label-mono text-label-mono text-secondary">Generate</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Footer -->
+<footer class="bg-surface-container-lowest dark:bg-surface-container-lowest w-full py-stack-lg border-t border-outline-variant">
+<div class="flex flex-col md:flex-row justify-between items-center px-margin-desktop gap-stack-md max-w-container-max mx-auto w-full">
+<div class="flex flex-col items-center md:items-start gap-2">
+<div class="font-headline-md text-headline-md font-bold text-primary">RAGScope</div>
+<div class="font-caption text-caption text-on-surface-variant">© 2024 RAGScope. Precision AI Infrastructure.</div>
+</div>
+<div class="flex gap-gutter font-caption text-caption">
+<a class="text-on-surface-variant hover:text-secondary transition-colors" href="#">Privacy Policy</a>
+<a class="text-on-surface-variant hover:text-secondary transition-colors" href="#">Terms of Service</a>
+<a class="text-on-surface-variant hover:text-secondary transition-colors" href="#">Github</a>
+<a class="text-on-surface-variant hover:text-secondary transition-colors" href="#">Status</a>
+</div>
+</div>
+</footer>
+<!-- Chat Widget -->
+<div class="fixed bottom-8 right-8 z-[60] cursor-pointer group" id="chat-widget">
+<div class="w-16 h-16 bg-primary-container text-on-primary-container rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(0,212,170,0.6)] border-2 border-white/20 transition-all hover:scale-110">
+<span class="material-symbols-outlined text-3xl">chat</span>
+</div>
+<div class="absolute bottom-full right-0 mb-4 w-72 glass-panel p-stack-md rounded-xl hidden group-hover:block transition-all opacity-0 group-hover:opacity-100 ai-pulse">
+<p class="text-on-surface mb-2 font-bold">RAGScope AI Assistant</p>
+<p class="text-on-surface-variant text-sm">Hi! How can I help you optimize your RAG pipeline today?</p>
+<div class="mt-stack-sm flex gap-2">
+<div class="h-2 w-2 bg-primary rounded-full animate-bounce"></div>
+<div class="h-2 w-2 bg-primary rounded-full animate-bounce delay-100"></div>
+<div class="h-2 w-2 bg-primary rounded-full animate-bounce delay-200"></div>
+</div>
+</div>
+</div>
+<script>
+        // Simple scroll observer for nav shadow
+        window.addEventListener('scroll', () => {
+            const nav = document.querySelector('nav');
+            if (window.scrollY > 20) {
+                nav.classList.add('shadow-xl', 'bg-background/95');
+            } else {
+                nav.classList.remove('shadow-xl', 'bg-background/95');
+            }
+        });
+
+        // Hover animation logic for chat widget expansion (simulated)
+        const chatWidget = document.getElementById('chat-widget');
+        chatWidget.addEventListener('click', () => {
+            // Interactive logic could go here
+            console.log('Chat widget clicked');
+        });
+    </script>
+</body></html>
