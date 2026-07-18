@@ -67,7 +67,7 @@ class DenseRetriever:
             vector_str = "[" + ",".join(str(v) for v in query_vector) + "]"
 
             sql = text("""
-                SELECT 
+                SELECT
                     c.id,
                     c.content,
                     c.element_type,
