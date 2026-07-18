@@ -65,13 +65,21 @@ target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
+# E/F/W: pycodestyle + pyflakes (errors), I: isort, N: naming
+# B: bugbear (critical bugs only), RUF: ruff-native
+# Excluded: SIM (style), UP (upgrade hints), B905 (zip strict) — too noisy pre-Phase3
+select = ["E", "F", "W", "I", "N", "B", "RUF"]
+ignore = [
+    "B008",   # Depends() in FastAPI defaults is idiomatic
+    "B904",   # raise from exc — cosmetic in Celery retry pattern
+    "RUF012", # ClassVar annotation — cosmetic
+    "E501",   # line too long — handled by formatter, not linter
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.mypy]
@@ -81,4 +89,4 @@ plugins = ["pydantic.mypy"]
 
 [build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"

@@ -126,7 +126,7 @@ class IngestionPipeline:
                         "store.chunk_count": len(text_chunks),
                     },
                 ):
-                    for chunk_data, embedding in zip(text_chunks, embeddings):
+                    for chunk_data, embedding in zip(text_chunks, embeddings, strict=True):
                         chunk = Chunk(
                             document_id=doc_id,
                             content=chunk_data.content,
