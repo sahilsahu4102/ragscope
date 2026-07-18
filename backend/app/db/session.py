@@ -1,0 +1,51 @@
+"""
+RAGScope — Database Session & Engine
+
+Async SQLAlchemy engine with pgvector extension registration.
+"""
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import text
+
+from app.config import settings
+
+
+engine = create_async_engine(
+    settings.database_url,
+    echo=settings.app_env == "development",
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,
+)
+
+async_session = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
+
+
+class Base(DeclarativeBase):
+    """SQLAlchemy declarative base for all models."""
+    pass
+
+
+async def init_db() -> None:
+    """Initialize database — create tables and enable pgvector extension."""
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.run_sync(Base.metadata.create_all)
+
+
+async def get_db() -> AsyncSession:
+    """Dependency — yields an async DB session."""
+    async with async_session() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()

@@ -1,0 +1,237 @@
+# Build Blueprint: A Self-Hosted, Production-Grade RAG Platform with a Built-In Evaluation & Observability Layer
+
+## TL;DR
+- **Build "RAGProbe" (working name): a self-hostable, general-purpose RAG-as-a-platform that anyone can point at their own documents, plus a first-class evaluation + observability layer** (LLM-as-judge metrics, OpenTelemetry/OpenInference tracing, regression CI gates, A/B experiments). The eval/observability layer — not the chatbot — is the differentiator that beats generic RAG projects and lets the project match or exceed commercial tools (LangSmith, Arize Phoenix, Langfuse, Ragas, TruLens, DeepEval).
+- **The highest-ROI accuracy levers, in order:** (1) fix document parsing/chunking, (2) hybrid search (BM25 + dense) with Reciprocal Rank Fusion, (3) cross-encoder reranking, (4) contextual retrieval, (5) query transformation, (6) self-correction (CRAG) and hierarchical/graph retrieval for specific query types. Per Anthropic's engineering post "Contextual Retrieval in AI Systems," reranked contextual embeddings + contextual BM25 "reduced the top-20-chunk retrieval failure rate by 67% (5.7% → 1.9%)."
+- **Scope for a 6–10 week part-time build:** MVP vertical slice (weeks 1–2) → advanced retrieval (3–4) → eval harness (5–6) → observability + dashboard (7–8) → deploy/polish/benchmark blog (9–10). Consider a **legislative/legal vertical** as an optional narrative layer (she has relevant nonprofit experience) because legal RAG has hard, resume-friendly problems: citation-grounding, hallucination reduction, and a purpose-built benchmark (LegalBench-RAG).
+
+---
+
+## Key Findings
+
+1. **The market is crowded with eval/observability tools, and that is the opportunity.** LangSmith, Arize Phoenix (OpenTelemetry-native, self-hostable), Langfuse (MIT, self-host), Ragas (metrics), TruLens (RAG triad), DeepEval/Confident AI (pytest-style), promptfoo (CI), and Vellum all exist. A student who *rebuilds the core mechanics of these* — trace spans, LLM-judge metrics, golden datasets, regression gates, experiment comparison — demonstrates she understands them at the implementation level, not just as an API caller. That is the FAANG/big-tech signal that separates her from the thousands of "I built a PDF chatbot" projects.
+
+2. **Accuracy is a stacked, measurable problem — which means the project can report deltas.** Per Yang et al., "CRAG – Comprehensive RAG Benchmark" (arXiv:2406.04744, NeurIPS 2024), a benchmark of 4,409 QA pairs: "most advanced LLMs achieve ≤34% accuracy on CRAG, adding RAG in a straightforward manner improves the accuracy only to 44%. State-of-the-art industry RAG solutions only answer 63% of questions without any hallucination." Every technique in the accuracy playbook below has published impact numbers, so the platform can quantify before/after improvements — exactly what recruiters want.
+
+3. **Reranking is the single highest-ROI improvement.** Multiple 2025–2026 practitioner sources converge that cross-encoder reranking adds roughly +5 to +15 NDCG@10 points, and Anthropic's contextual-retrieval + reranking combination cut top-20 retrieval failure by 67% (5.7% → 1.9%).
+
+4. **Her existing stack maps perfectly onto production RAG.** FastAPI + Next.js/TS + GCP Cloud Run + Vertex AI/Gemini + LangGraph + LlamaIndex is exactly the modern production RAG stack. Recommended additions she already has adjacent skills for: pgvector (she knows Postgres/Firebase) or Qdrant, Redis for caching/queues, Celery/Arq for async ingestion, and OpenTelemetry + OpenInference for tracing.
+
+---
+
+## Details
+
+### 1. WHAT TO INCLUDE — CORE FEATURE SET & HOW TO BEAT TUTORIAL PROJECTS
+
+**A. Document ingestion pipeline**
+- **Multi-format parsing (PDF/DOCX/HTML/tables/images).** Best-in-class = layout-aware, vision-language parsing that preserves tables, reading order, and hierarchy. Tools: **Docling** (open-source, IBM Research, uses DocLayNet + TableFormer; hit 97.9% cell accuracy on a complex table in a Procycons 2025 benchmark — the best free self-host option), **LlamaParse** (VLM-based, best for visually complex PDFs, free tier), **Unstructured** (30+ formats). Beat demos by routing by document type (rule-based extraction for clean digital PDFs, VLM parsing for scanned/complex), preserving element types, and adding OCR fallback (Tesseract/Docling). A 2024 SEC-filings study found element-type-based chunking improved retrieval and roughly halved the chunk count (cutting indexing cost).
+- **Chunking strategies.** Support and benchmark multiple: fixed, recursive (LangChain default and a strong baseline — a Feb-2026 Vecta benchmark of 7 strategies placed recursive 512-token splitting first at 69% accuracy), semantic, proposition-based, hierarchical/parent-child (the most-adopted production pattern in 2025–26: small chunks to find, large chunks to generate/understand), and **late chunking** (embed the whole document with a long-context model, then split — preserves cross-references). Weaviate's 2025 benchmark showed the wrong chunking method can open a ~9% recall gap on the same corpus with the same retriever/embedding model. Beat demos by making chunking a **configurable, benchmarked experiment**, not a hardcoded 512.
+- **Metadata extraction & enrichment.** Extract titles, headings, section paths, dates, and entities. Governed metadata improved AI-agent SQL accuracy by 38% (Atlan research). Add **contextual retrieval** (Anthropic): prepend an LLM-generated chunk-context summary before embedding.
+
+**B. Embedding model choice & management**
+- Use MTEB/MMTEB as a *shortlist*, then test on your own corpus. Strong 2025–26 options: **Gemini Embedding** (reported ~68.32 MTEB English average on the refreshed leaderboard, Matryoshka down to 768 dims, negligible API cost — ideal since she's on GCP), OpenAI text-embedding-3-large/small, **Qwen3-Embedding-8B** (open, ~70.58 MMTEB multilingual, Apache 2.0), BGE-M3, Cohere embed-v4.
+- **Matryoshka Representation Learning** is now the industry standard — embed once at full dimension, truncate to 256/768 for speed/cost with graceful quality degradation. Support **multi-vector/ColBERT late interaction** as an advanced option.
+- Beat demos with an **embedding-model registry** so switching models + re-indexing is one config change, and log dimension/latency/cost tradeoffs per model.
+
+**C. Vector store**
+- **pgvector** (recommended default): she knows Postgres; HNSW indexes (pgvector ≥0.5.0) match or beat dedicated vector DBs under ~10M vectors; ACID transactions + SQL joins + metadata filtering in one database. Supabase benchmarks showed pgvector HNSW matching/outperforming Qdrant on equivalent compute at 99% recall; production reports put pgvector HNSW at ~5–8ms query latency.
+- **Qdrant** (recommended alternative if filtering/hybrid is central): written in Rust, best-in-class filtered search (pre-filter inside HNSW traversal, ~1–3ms overhead regardless of selectivity), native sparse+dense hybrid, per-collection quantization.
+- **Weaviate**: batteries-included hybrid with alpha blending, but higher memory (one test: 48GB for 2M vectors vs 18GB for equivalent Qdrant).
+- Expose tunable HNSW params (m, ef_construction, ef_search).
+
+**D. Retrieval**
+- Dense + sparse/BM25 + **hybrid with Reciprocal Rank Fusion** (RRF): `score(d) = Σ 1/(k + rank(d))`, with k=60 the industry default (introduced by Cormack, Clarke & Büttcher, 2009 SIGIR); use k=10–20 for small corpora where rank differences are more meaningful. RRF operates on ranks not raw scores, sidestepping the BM25-vs-cosine scale-incompatibility problem. Hybrid improves NDCG roughly 26–31% over dense-only on mixed-query benchmarks. Also support weighted/alpha fusion.
+- Metadata filtering, multi-query fan-out, **HyDE** (hypothetical document embeddings — Gao et al. 2022, strong zero-shot), query rewriting/decomposition (essential for multi-hop), self-query, and **step-back** prompting (Zheng et al./DeepMind — useful for analytical queries). Default recommendation from practitioners: conversational rewriting + optional HyDE covers most failure modes at ~150ms added latency.
+
+**E. Reranking (highest-ROI single lever)**
+- Cross-encoder rerank of top-50/100 candidates → top-5/10. Options: **Cohere Rerank 4** (managed, 100+ languages, lowest-friction), **BGE-reranker-v2-m3** (open, Apache 2.0, self-host), **ColBERTv2** (late interaction, token-level, tight latency budgets), Jina v2, Voyage rerank-2.5, mxbai. Cross-encoders reportedly add +5 to +15 NDCG@10 across MTEB/BEIR. Expose reranker on/off as an experiment toggle so the improvement is measurable.
+
+**F. Context management**
+- Context-window packing, deduplication, compression, **lost-in-the-middle mitigation** (reorder so highest-scored chunks sit at the start and end of the context), and **parent-document retrieval** (retrieve small child chunks, feed large parent chunks to the LLM).
+
+**G. Generation**
+- Prompt templating, grounded generation (answer only from retrieved context), **citation/attribution** (structured, verifiable against the corpus), structured outputs (Pydantic/JSON), and streaming (SSE).
+
+**H. Advanced RAG patterns**
+- **Agentic RAG** (LangGraph — her existing skill), **Self-RAG** (self-reflection tokens deciding when to retrieve), **Corrective RAG/CRAG** (a lightweight retrieval-quality evaluator + knowledge refinement + web-search fallback + decompose-then-recompose; Yan et al. 2024), **GraphRAG** (entity-relation graph for multi-hop/global questions — RAG and GraphRAG each uniquely answer distinct query subsets, per a 2025 systematic evaluation), and **RAPTOR** (Recursive Abstractive Processing for Tree-Organized Retrieval; Sarthi et al., Stanford, ICLR 2024). RAPTOR recursively embeds (SBERT) → clusters (Gaussian Mixture Model) → summarizes (LLM) chunks into a multi-layer tree, then retrieves via tree-traversal or collapsed-tree. Per the paper (arXiv:2401.18059): "RAPTOR paired with GPT-4 sets a new state-of-the-art with an accuracy of 82.6%, surpassing the previous best result of 62.3%" on the QuALITY benchmark (a ~20-point absolute improvement), plus a 55.7% F1 SOTA on QASPER.
+
+**I. Caching**
+- **Semantic caching** (Redis/GPTCache): embed the query and return a cached answer if similarity exceeds a threshold (production thresholds run 0.7–0.95; higher = fewer wrong hits). Cache hits return in sub-millisecond to ~50ms vs 3–10s for a live LLM call. Per Redis's LLMOps guidance, semantic caching with LangCache achieves "up to 73% cost reduction" in high-repetition workloads (a Redis/Mangoes.ai case study reports a 70% cache hit rate, ~70% LLM-spend savings, and 4× faster responses).
+
+**J. Guardrails**
+- Layered defense mapped to the OWASP LLM Top 10: input validation → prompt-template hardening → retrieval rail (filter poisoned/adversarial chunks) → output filtering → tool-call gating. Components: hallucination detection (Patronus Lynx via NeMo Guardrails, AlignScore, groundedness checks), PII handling (Microsoft Presidio; commercial guards cover 39+ PII types), and prompt-injection/jailbreak defense (Llama Guard, NeMo Guardrails).
+
+### 2. THE ACCURACY PLAYBOOK (prioritized, highest → lowest ROI)
+
+1. **Fix parsing + chunking first.** Garbage in = garbage out; document parsing is the #1 RAG quality bottleneck. Use layout-aware parsing + hierarchical/parent-child chunking. Chunking alone can swing recall ~9%.
+2. **Hybrid search + RRF.** ~26–31% NDCG over dense-only; catches exact terms (product codes, proper nouns) that dense retrieval misses. Cheap, robust, no score normalization.
+3. **Reranking (cross-encoder).** +5–15 NDCG@10, the biggest single quality lever, at ~50–200ms added latency.
+4. **Contextual retrieval (Anthropic).** Per Anthropic's engineering post: contextual embeddings alone reduced top-20 retrieval failures 35% (5.7%→3.7%); + contextual BM25, 49% (→2.9%); + reranking, 67% (→1.9%). One-time indexing cost of "$1.02 per million document tokens" using Claude 3 Haiku with prompt caching.
+5. **Query transformation.** Conversational rewriting + HyDE as the default; decomposition for multi-hop; step-back for analytical. Each adds one LLM call (~150ms).
+6. **Metadata filtering + right embedding model for the domain.** Fine-tune or pick a domain embedding (legal/medical); governed metadata gave +38% agent accuracy.
+7. **Context compression + reordering** (lost-in-the-middle mitigation).
+8. **Citations/grounding prompts** to reduce hallucination.
+9. **Self-correction loops (CRAG/Self-RAG)** for robustness when retrieval quality varies.
+10. **GraphRAG** for multi-hop/relational and **RAPTOR** for global/summary questions — apply surgically to the query types they help.
+11. **Chunk-size and top-k tuning + evaluation-driven iteration** — measured against the golden set, not guessed.
+
+### 3. THE EVALUATION & OBSERVABILITY LAYER (the differentiator)
+
+**Evaluation — metrics to compute:**
+- *Retrieval:* context precision, context recall, hit rate, MRR, NDCG@k, Precision@k / Recall@k.
+- *Generation:* faithfulness/groundedness, answer relevance, answer correctness, semantic similarity. Ragas provides all of these (its metric catalog spans faithfulness, context precision/recall, response relevancy, factual correctness, noise sensitivity, and more). The six anchor metrics for a complete 2026 program: faithfulness, context precision, context recall, groundedness, answer relevance, and hallucination.
+- *Why both stages matter:* the canonical failure story — a legal RAG scored 0.91 faithfulness offline but customers reported 1-in-6 answers missed a key statute; context recall was 0.62. The retriever missed the second statute on multi-hop questions while the generator answered coherently from partial context, so faithfulness stayed high. Measuring only generation hides retrieval regressions — build both.
+
+**LLM-as-judge methodology:**
+- Pointwise (analytic rubric — best for debugging and longitudinal monitoring) vs pairwise (best for model selection — "is B better than baseline A?"). Use strong judges (Gemini/GPT).
+- **Bias mitigation is a depth signal.** Address position/order bias (randomize candidate order — see Shi et al., "Judging the Judges," IJCNLP 2025), verbosity bias, and self-preference bias. Even SOTA judges average only Fleiss' Kappa ≈ 0.3 on multilingual evaluation. Calibrate against human labels; a divergence above ~20–25% signals the rubric needs recalibration. Reference-guided scoring beats prompt-only when a gold reference exists (MT-Bench finding); a jury/panel of diverse judges can beat a single strong model.
+
+**Golden/eval dataset:**
+- Synthetic generation with **Ragas TestsetGenerator**, which builds an internal knowledge graph from the source documents and traverses it with different synthesizers (single-hop specific + multi-hop abstract + multi-hop specific) to create diverse, faithful test data. Per Ragas docs, "by using synthetic data generation developer time in [the] data aggregation process can be reduced by 90%." Add human labeling and dataset versioning. LlamaIndex offers equivalent generators.
+
+**Regression testing / CI quality gates:**
+- Use DeepEval (pytest-style assertions) or promptfoo inside GitHub Actions to fail a build/PR if faithfulness or context recall drops below threshold. Arize Phoenix supports running experiments on every PR with the exit code reflecting pass/fail — replicate this.
+
+**A/B experiment tracking:** compare configs (embedding model, chunk size, reranker on/off, top-k) side by side with metric deltas — this mirrors Phoenix's "Experiments" feature; rebuilding it is the portfolio win.
+
+**Observability:**
+- **Distributed tracing with OpenTelemetry + OpenInference.** Instrument spans for retrieve → rerank → generate. OpenInference (Arize's app-shaped convention set, mirrored across Python/JS/Java) defines **10 span kinds** — LLM, EMBEDDING, RETRIEVER, RERANKER, CHAIN, TOOL, AGENT, GUARDRAIL, EVALUATOR, PROMPT — each requiring an `openinference.span.kind` attribute. Capture `document.id`/`document.score` on RETRIEVER spans and `reranker.input_documents`/`reranker.output_documents`/`reranker.top_k`/`reranker.model_name` on RERANKER spans. The official OTel `gen_ai.*` conventions (still "Development"/experimental status as of mid-2026; the GenAI SIG formed April 2024) provide `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, and `gen_ai.operation.name` (values: chat, embeddings, retrieval, execute_tool, …), plus metrics `gen_ai.client.operation.duration` and `gen_ai.client.token.usage`. Because OpenInference is more stable for app-level RAG spans, make it the source of truth and map to `gen_ai.*` where useful.
+- Token/cost/latency per step, retrieved chunks + scores captured per query, and a **custom Next.js dashboard** (more portfolio-impressive than stock Grafana, though Prometheus/Grafana can back it).
+- Online monitoring: drift detection, live faithfulness scoring on sampled production traffic, user feedback capture (thumbs up/down + corrections), and alerting.
+- **How the incumbents implement this (to match/exceed):** Phoenix is OpenTelemetry/OpenInference-first with strong built-in RAG evaluators and embeddings analysis; Langfuse is the broader product-iteration platform (prompt registry, cost analytics, session grouping); LangSmith is deepest for LangChain/LangGraph. A common production split is Langfuse for live tracing + Phoenix for offline eval — a custom build should demonstrate both loops in one system.
+
+### 4. SYSTEM ARCHITECTURE & FULL PROJECT STRUCTURE
+
+**High-level architecture (services):**
+- **Ingestion service** (FastAPI + Celery/Arq workers): parse → chunk → enrich (contextual retrieval) → embed → upsert to vector store. Async via Redis queue; blobs in GCS.
+- **Retrieval/query service:** hybrid retrieve (dense + BM25) → RRF fusion → rerank → context assembly (dedup, reorder, parent-doc expansion).
+- **Generation service:** prompt + Gemini/Vertex AI → grounded answer + citations, streaming over SSE.
+- **Eval service:** golden datasets, metric computation (Ragas + custom LLM-judge), experiment runs, CI hook.
+- **Observability/tracing:** OpenTelemetry collector + OpenInference instrumentation → trace store (Postgres, or ClickHouse at scale) + span processors.
+- **Frontend dashboard** (Next.js/React/TS): playground, ingestion mgmt, retrieval inspector, eval dashboard, experiment comparison, trace viewer, cost/latency analytics.
+- **Background workers/queues:** Celery or Arq + Redis.
+
+**Recommended tech stack + justification:**
+- **Backend:** FastAPI (async, her stack).
+- **Frontend:** Next.js/React/TypeScript (her stack).
+- **Vector + relational:** Postgres + pgvector (single DB she already knows; ACID; SQL filtering; ≤10M vectors). Qdrant as the alternative when filtered/hybrid search scale demands it.
+- **Cache/queue:** Redis (semantic cache + Celery broker/result backend).
+- **Async ingestion:** Celery (mature, Flower monitoring) or Arq (lighter, async-native).
+- **Tracing:** OpenTelemetry + OpenInference; optionally embed Phoenix locally as a comparison baseline.
+- **Metrics:** Prometheus/Grafana optional; custom Next.js analytics preferred for the portfolio.
+- **Containerization:** Docker + docker-compose.
+- **Deploy:** GCP Cloud Run (her stack); Vertex AI for Gemini/embeddings; Cloud SQL for Postgres+pgvector; GCS for document blobs.
+- **CI/CD:** GitHub Actions (eval regression gates + unit tests + deploy).
+
+**Key REST endpoints:**
+- `POST /ingest` (upload/URL → job id), `GET /ingest/{job_id}` (status)
+- `POST /query` (question → answer + citations + trace_id), `POST /query/stream` (SSE)
+- `POST /retrieve` (debug: returns chunks + dense/sparse/RRF/rerank scores, no generation)
+- `POST /evaluate` (run metrics on a dataset), `GET /experiments`, `POST /experiments` (compare configs)
+- `GET /traces/{trace_id}`, `GET /traces` (list/filter)
+- `POST /feedback` (thumbs, correction)
+- `GET /datasets`, `POST /datasets` (versioned golden-set CRUD)
+
+**Data models/schemas:** `documents`, `chunks` (parent_id, metadata JSONB, embedding vector, contextual summary), `embeddings` (model, dim), `queries`, `traces`/`spans`, `eval_runs`, `datasets` (versioned), `experiments`, `feedback`.
+
+**Frontend pages:**
+1. **Playground/Chat** — chat with inline citations, streaming, per-answer faithfulness score.
+2. **Ingestion management** — upload, job status, parser/chunker config, document list.
+3. **Retrieval inspector** — enter a query, see retrieved chunks + dense/sparse/RRF/rerank scores side by side (the "wow" page that shows depth).
+4. **Eval dashboard** — metric trends over time with per-metric drill-down.
+5. **Experiment comparison** — A/B configs with metric deltas.
+6. **Trace viewer** — span waterfall (retrieve → rerank → generate) with token/cost/latency per span.
+7. **Cost/latency analytics** — p50/p95, cost/query, cache hit rate, throughput.
+
+**Recommended monorepo folder structure (Antigravity-friendly):**
+```
+ragprobe/
+├── docker-compose.yml
+├── README.md                      # architecture diagram + live benchmark table
+├── .env.example
+├── .github/workflows/
+│   ├── ci.yml                     # tests + lint
+│   └── evals.yml                  # regression gate on PRs (fail if metrics drop)
+├── backend/
+│   ├── pyproject.toml
+│   ├── app/
+│   │   ├── main.py                # FastAPI entrypoint
+│   │   ├── config.py              # pydantic-settings
+│   │   ├── api/                   # routers: ingest, query, evaluate, experiments, traces, feedback
+│   │   ├── ingestion/             # parsers, chunkers, enrichers, embedders
+│   │   ├── retrieval/             # dense, sparse, hybrid/RRF, rerankers, query_transform
+│   │   ├── generation/            # prompts, grounding, citations, streaming
+│   │   ├── eval/                  # ragas wrappers, llm_judge, metrics, dataset gen
+│   │   ├── observability/         # otel setup, openinference spans, cost calc
+│   │   ├── caching/               # semantic cache
+│   │   ├── guardrails/            # pii, injection, hallucination
+│   │   ├── models/                # SQLAlchemy models
+│   │   ├── schemas/               # pydantic
+│   │   ├── db/                    # session, alembic migrations
+│   │   └── workers/               # celery/arq tasks
+│   └── tests/
+├── frontend/
+│   ├── package.json
+│   ├── app/                       # Next.js app-router pages (playground, ingest, inspector, evals, experiments, traces, analytics)
+│   ├── components/
+│   └── lib/                       # api client, types
+└── eval-datasets/                 # versioned golden sets (jsonl)
+```
+This layout is deliberately service-modular so Antigravity can build one folder at a time against clear interfaces.
+
+### 5. ORDERED BUILD PLAN / ROADMAP FOR ANTIGRAVITY
+
+**Phase 0 — Scaffold (a few days):** monorepo, docker-compose (FastAPI + Postgres/pgvector + Redis), Next.js skeleton, CI lint/test, config + env.
+
+**Phase 1 — MVP vertical slice (weeks 1–2) [MUST-HAVE]:** ingest one PDF → recursive chunk → embed (Gemini) → pgvector → dense retrieve → Gemini generate with citations → minimal chat UI. One working end-to-end query. Wire basic OpenInference spans from day one.
+
+**Phase 2 — Advanced retrieval (weeks 3–4) [MUST-HAVE]:** add BM25 + hybrid RRF; add cross-encoder/Cohere reranking; add parent-child chunking + contextual retrieval; add query rewriting/HyDE; semantic cache. Build the **retrieval inspector** page.
+
+**Phase 3 — Eval harness (weeks 5–6) [MUST-HAVE — the differentiator]:** Ragas synthetic golden-set generation; compute retrieval + generation metrics; custom LLM-as-judge with position-bias mitigation and human-calibration spot-checks; eval dashboard; **CI regression gate** (fail a PR if faithfulness/recall drops).
+
+**Phase 4 — Observability + experiments (weeks 7–8) [MUST-HAVE]:** full OpenInference span tree (retrieve → rerank → generate) with token/cost/latency; trace viewer; A/B experiment comparison (embedding model, chunk size, reranker on/off); cost/latency analytics.
+
+**Phase 5 — Deploy, polish, benchmark (weeks 9–10) [MUST-HAVE + STRETCH]:** Cloud Run deploy + Cloud SQL + Vertex AI; guardrails (PII, injection, hallucination); live demo; **benchmark blog post** with before/after metric deltas; architecture writeup.
+
+**Stretch:** CRAG self-correction loop (LangGraph), GraphRAG, RAPTOR, drift detection, multi-tenancy, multimodal/VLM parsing.
+
+**Scope realism:** Phases 1–4 are the must-have core for a standout portfolio. Phase 5 (deploy + blog) makes it verifiable. GraphRAG/RAPTOR/CRAG are stretch — implement **one** to show depth; do not block the eval/observability layer on all three.
+
+### 6. RESUME & DIFFERENTIATION FRAMING
+
+**Quantifiable metrics to measure and cite:**
+- *Retrieval:* hit-rate / Recall@k, NDCG@10 improvement (baseline → hybrid + rerank).
+- *Generation:* faithfulness %, hallucination-rate reduction, answer-correctness.
+- *Systems:* p95 latency, cost/query, cache hit rate, throughput (QPS), number of documents/queries handled.
+
+**Exact keywords to include:** RAG, hybrid search, BM25, dense/sparse retrieval, Reciprocal Rank Fusion, reranking, cross-encoder, ColBERT/late interaction, vector database, pgvector/Qdrant, embeddings, MTEB, Matryoshka, contextual retrieval, LLM-as-judge, evaluation, faithfulness, context precision/recall, NDCG, Ragas, observability, OpenTelemetry, OpenInference, distributed tracing, MLOps, LangGraph, agentic RAG, CRAG, GraphRAG, RAPTOR, FastAPI, Next.js, GCP Cloud Run, Vertex AI, Gemini, CI/CD, regression testing.
+
+**XYZ-formula resume bullet examples (fill in her measured numbers):**
+1. "Built a self-hosted, production RAG platform (FastAPI, Next.js, pgvector, Gemini/Vertex AI) with hybrid search (BM25 + dense + Reciprocal Rank Fusion) and cross-encoder reranking, improving retrieval NDCG@10 from 0.62 to 0.89 across a 100k-chunk corpus."
+2. "Designed the platform's evaluation + observability layer — Ragas + a custom position-bias-corrected LLM-as-judge, OpenTelemetry/OpenInference distributed tracing, and CI regression gates — cutting measured hallucination rate from 18% to 3.6% on a 300-sample weekly eval with no helpfulness regression."
+3. "Engineered async ingestion (Celery/Redis) and semantic caching, reducing p95 query latency to <900ms and cost/query by ~70% at N documents; deployed on GCP Cloud Run with GitHub Actions CI/CD and a live trace viewer."
+
+**What makes THIS stand out from generic RAG chatbots:**
+- A **measured, reproducible eval harness** and **CI quality gates** — recruiters rarely see a student rebuild the core of LangSmith/Phoenix.
+- **Distributed tracing** with a custom trace viewer (a genuine MLOps signal, not a demo).
+- Every accuracy claim carries a **before/after number with a baseline** — the pattern senior reviewers explicitly reward.
+- It is **verifiable**: live demo + GitHub commit history + benchmark blog + architecture writeup.
+- An optional **legal/legislative vertical** ties to her nonprofit experience and shows domain depth. The problem is real and hard: per Magesh et al., "Hallucination-Free? Assessing the Reliability of Leading AI Legal Research Tools" (22 J. Empirical Legal Stud. 216, 2025; arXiv:2405.20362; 202 queries), leading commercial legal tools "hallucinate between 17% and 33% of the time" (Lexis+ AI ~17%, Westlaw AI-Assisted Research ~33%, GPT-4 ~43%). LegalBench-RAG (arXiv:2408.10343; 6,858 expert-annotated query-answer pairs) gives her a ready benchmark, and citation-aware chunking + citation verification are concrete, differentiating features standard frameworks don't ship.
+
+---
+
+## Recommendations
+
+1. **Build the general-purpose platform first; add the legal vertical as a demo dataset + case study.** The platform is the flagship; the legal corpus is a compelling story that shows the eval layer catching real hallucinations. Don't over-commit to legal-only.
+2. **Instrument observability from Phase 1, not the end.** Traces are core architecture, not decoration — wire OpenInference spans into the very first query.
+3. **Make the eval/observability layer the centerpiece.** Spend the most polish time on the retrieval inspector, eval dashboard, experiment comparison, and trace viewer — these are what separate this from a chatbot.
+4. **Report every accuracy improvement as a delta with a baseline**, and keep a benchmark table in the README from day one.
+5. **Decision thresholds that change the plan:** if p95 latency > 3s, add/expand semantic caching and reduce rerank candidate count; if context recall < 0.7, fix chunking/hybrid before touching generation; if faithfulness < 0.8, add citation-grounding + a CRAG self-correction loop; if the timeline slips, cut GraphRAG/RAPTOR (stretch) before cutting the eval harness (core).
+6. **Ship a benchmark blog post + live demo.** Verifiability is what converts a GitHub repo into an interview.
+
+## Caveats
+- Several cited impact numbers (e.g., reranking lift, "67% failure reduction," "26–31% NDCG gain") come from vendor blogs and specific datasets; they are directional, not guaranteed on her corpus. She must measure on her own data — which is precisely what the eval layer is for.
+- MTEB/MMTEB leaderboard rankings don't always translate to real-world performance and aren't comparable across benchmark versions; use them as a shortlist, then test locally.
+- OpenTelemetry's GenAI semantic conventions remain experimental ("Development" status) as of mid-2026 and may change; OpenInference is the more stable choice for app-level RAG spans.
+- Chunking research is genuinely contradictory (some 2025 papers find semantic chunking not worth its cost vs recursive; others find large gains for adaptive/hierarchical). That's a feature, not a bug — it gives her benchmark harness something real and defensible to measure.
+- Legal RAG carries real downside risk (hallucinated citations damage credibility instantly). If she builds the vertical, citation verification must be mandatory, not optional.
