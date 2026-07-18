@@ -138,3 +138,111 @@ class HealthResponse(BaseModel):
     """Health check response."""
 
     status: str
+
+
+# ── Evaluation ────────────────────────────────
+
+
+class DatasetCreateRequest(BaseModel):
+    """Request to create/generate an evaluation dataset."""
+
+    name: str = Field(..., min_length=1, max_length=200)
+    version: str = Field(default="1.0")
+    document_ids: list[str] | None = None
+    num_questions: int = Field(default=20, ge=5, le=100)
+
+
+class DatasetUploadRequest(BaseModel):
+    """Request to upload a pre-built evaluation dataset."""
+
+    name: str = Field(..., min_length=1, max_length=200)
+    version: str = Field(default="1.0")
+    description: str | None = None
+    samples: list[dict] = Field(
+        ...,
+        description="List of {question, gold_answer, gold_contexts, metadata}",
+    )
+
+
+class DatasetResponse(BaseModel):
+    """Response for a dataset."""
+
+    id: str
+    name: str
+    version: str
+    description: str | None = None
+    sample_count: int
+    created_at: str
+
+
+class DatasetDetailResponse(DatasetResponse):
+    """Detailed dataset response including samples."""
+
+    samples: list[dict]
+    source_documents: list[str] | None = None
+
+
+class EvalRunRequest(BaseModel):
+    """Request to trigger an evaluation run."""
+
+    dataset_id: str
+    run_name: str | None = None
+    use_llm_judge: bool = Field(default=True, description="Enable LLM-as-Judge scoring")
+    config_overrides: dict | None = Field(
+        default=None,
+        description="Override config: top_k, rerank_top_k, rrf_k, "
+        "use_reranker, use_hybrid, query_transform",
+    )
+
+
+class EvalMetricSummary(BaseModel):
+    """Summary of a single metric with threshold check."""
+
+    value: float
+    threshold: float | None = None
+    passed: bool | None = None
+
+
+class EvalRunResponse(BaseModel):
+    """Response for an evaluation run."""
+
+    id: str
+    dataset_id: str
+    name: str | None = None
+    status: str
+    config_snapshot: dict | None = None
+    metrics: dict | None = None
+    total_samples: int | None = None
+    passed_samples: int | None = None
+    failed_samples: int | None = None
+    total_latency_ms: float | None = None
+    created_at: str
+    completed_at: str | None = None
+
+
+class EvalSampleResponse(BaseModel):
+    """Per-sample evaluation result."""
+
+    sample_index: int
+    question: str
+    gold_answer: str | None = None
+    generated_answer: str | None = None
+    metrics: dict | None = None
+    judge_reasoning: str | None = None
+    retrieval_latency_ms: float | None = None
+    generation_latency_ms: float | None = None
+
+
+class EvalRunDetailResponse(EvalRunResponse):
+    """Detailed eval run with per-sample results."""
+
+    samples: list[EvalSampleResponse] = []
+
+
+class RegressionGateResult(BaseModel):
+    """CI regression gate result — pass/fail with metric details."""
+
+    passed: bool
+    thresholds: dict[str, float]
+    actual: dict[str, float]
+    failures: list[str]

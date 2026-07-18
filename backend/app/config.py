@@ -77,5 +77,11 @@ class Settings(BaseSettings):
     rrf_k: int = 60
     semantic_cache_threshold: float = 0.85
 
+    # ── Evaluation ───────────────────────────────
+    eval_faithfulness_threshold: float = 0.80
+    eval_context_recall_threshold: float = 0.70
+    eval_context_precision_threshold: float = 0.60
+    eval_judge_model: str = ""  # Empty = use ollama_model
+
 
 settings = Settings()

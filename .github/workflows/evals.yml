@@ -7,20 +7,73 @@ on:
       - "backend/app/retrieval/**"
       - "backend/app/generation/**"
       - "backend/app/ingestion/**"
+      - "backend/app/eval/**"
 
 jobs:
   eval-gate:
     name: Eval Regression Check
     runs-on: ubuntu-latest
-    # TODO: Phase 3 — Implement eval runner + threshold assertions
-    # This workflow will:
-    #   1. Spin up services (Postgres, Redis, Ollama)
-    #   2. Ingest the golden dataset
-    #   3. Run eval metrics (faithfulness, context_recall, NDCG@10)
-    #   4. Assert thresholds: faithfulness >= 0.80, context_recall >= 0.70
-    #   5. Post metric summary as PR comment
-    #   6. Fail the PR if any metric drops below threshold
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ragscope
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: ragscope_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
     steps:
       - uses: actions/checkout@v4
-      - name: Placeholder
-        run: echo "Eval regression gate — will be implemented in Phase 3"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -e ".[dev]"
+
+      - name: Run eval metric unit tests
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_USER: ragscope
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: ragscope_test
+          REDIS_URL: redis://localhost:6379/0
+          OLLAMA_BASE_URL: http://localhost:11434
+          UPLOAD_DIR: /tmp/ragscope_uploads
+        run: |
+          cd backend
+          pytest tests/test_eval.py -v --tb=short
+
+      # Phase 3+ — Full eval run against golden dataset
+      # Uncomment when golden dataset is committed to eval-datasets/
+      # - name: Run full eval regression
+      #   env:
+      #     POSTGRES_HOST: localhost
+      #     POSTGRES_USER: ragscope
+      #     POSTGRES_PASSWORD: test
+      #     POSTGRES_DB: ragscope_test
+      #     REDIS_URL: redis://localhost:6379/0
+      #     OLLAMA_BASE_URL: http://localhost:11434
+      #   run: |
+      #     cd backend
+      #     python -m app.eval.ci_gate \
+      #       --dataset eval-datasets/golden-v1.jsonl \
+      #       --faithfulness-threshold 0.80 \
+      #       --context-recall-threshold 0.70 \
+      #       --ndcg-threshold 0.60
