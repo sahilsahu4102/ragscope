@@ -5,11 +5,10 @@ Swappable embedding-model registry with Ollama as default
 and Gemini API as the managed alternative.
 """
 
-import structlog
 from abc import ABC, abstractmethod
 
 import httpx
-import numpy as np
+import structlog
 
 from app.config import settings
 
@@ -38,7 +37,7 @@ class BaseEmbedder(ABC):
 class OllamaEmbedder(BaseEmbedder):
     """
     Embedder using self-hosted Ollama.
-    
+
     Default model: nomic-embed-text (768 dims, strong general-purpose).
     Fully self-hosted — no external API calls.
     """
@@ -96,7 +95,7 @@ class OllamaEmbedder(BaseEmbedder):
 class GeminiEmbedder(BaseEmbedder):
     """
     Embedder using Google Gemini Embedding API.
-    
+
     Model: text-embedding-004 (~768 dims, Matryoshka support).
     Requires GEMINI_API_KEY in config.
     """
@@ -152,7 +151,7 @@ class GeminiEmbedder(BaseEmbedder):
 def get_embedder(provider: str | None = None) -> BaseEmbedder:
     """
     Embedding model registry — factory function.
-    
+
     Switching models is one config change:
       DEFAULT_EMBEDDING_PROVIDER=ollama  → OllamaEmbedder
       DEFAULT_EMBEDDING_PROVIDER=gemini  → GeminiEmbedder

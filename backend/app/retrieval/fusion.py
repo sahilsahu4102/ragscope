@@ -12,7 +12,8 @@ Reference: Cormack, Clarke & Büttcher, 2009 SIGIR.
 """
 
 import structlog
-from app.observability.tracer import get_tracer, create_span
+
+from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
 tracer = get_tracer("retrieval")
@@ -37,16 +38,21 @@ def reciprocal_rank_fusion(
     Returns:
         Fused and re-ranked list of results with rrf_score field.
     """
-    with create_span(tracer, "rrf_fusion", "CHAIN", {
-        "fusion.type": "rrf",
-        "fusion.k": k,
-        "fusion.num_lists": len(ranked_lists),
-    }):
+    with create_span(
+        tracer,
+        "rrf_fusion",
+        "CHAIN",
+        {
+            "fusion.type": "rrf",
+            "fusion.k": k,
+            "fusion.num_lists": len(ranked_lists),
+        },
+    ):
         # Accumulate RRF scores per document
         rrf_scores: dict[str, float] = {}
         doc_data: dict[str, dict] = {}
 
-        for list_idx, ranked_list in enumerate(ranked_lists):
+        for _, ranked_list in enumerate(ranked_lists):
             for rank, doc in enumerate(ranked_list, start=1):
                 doc_id = doc[id_key]
                 rrf_score = 1.0 / (k + rank)
@@ -98,15 +104,20 @@ def weighted_fusion(
     Normalizes scores per list to [0,1] then computes weighted sum.
     Use when you want more control than RRF over retriever importance.
     """
-    with create_span(tracer, "weighted_fusion", "CHAIN", {
-        "fusion.type": "weighted",
-        "fusion.weights": str(weights),
-    }):
+    with create_span(
+        tracer,
+        "weighted_fusion",
+        "CHAIN",
+        {
+            "fusion.type": "weighted",
+            "fusion.weights": str(weights),
+        },
+    ):
         scores: dict[str, float] = {}
         doc_data: dict[str, dict] = {}
 
-        for list_idx, (ranked_list, weight, score_key) in enumerate(
-            zip(ranked_lists, weights, score_keys)
+        for _, (ranked_list, weight, score_key) in enumerate(
+            zip(ranked_lists, weights, score_keys, strict=True)
         ):
             if not ranked_list:
                 continue

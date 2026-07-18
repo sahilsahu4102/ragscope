@@ -1,5 +1,5 @@
 """RAGScope — Models package."""
 
-from app.models.models import Document, Chunk, Query, Feedback
+from app.models.models import Chunk, Document, Feedback, Query
 
-__all__ = ["Document", "Chunk", "Query", "Feedback"]
+__all__ = ["Chunk", "Document", "Feedback", "Query"]

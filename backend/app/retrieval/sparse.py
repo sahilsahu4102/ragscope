@@ -6,14 +6,12 @@ Catches exact terms (product codes, proper nouns) that dense retrieval misses.
 """
 
 import structlog
-from uuid import UUID
-
+from rank_bm25 import BM25Okapi
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from rank_bm25 import BM25Okapi
 
 from app.models import Chunk, Document
-from app.observability.tracer import get_tracer, create_span
+from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
 tracer = get_tracer("retrieval")
@@ -56,15 +54,17 @@ class SparseRetriever:
         tokenized_corpus: list[list[str]] = []
 
         for row in rows:
-            self._chunks.append({
-                "chunk_id": str(row.id),
-                "content": row.content,
-                "document_name": row.filename,
-                "element_type": row.element_type,
-                "chunk_index": row.chunk_index,
-                "token_count": row.token_count,
-                "metadata": row.metadata_ or {},
-            })
+            self._chunks.append(
+                {
+                    "chunk_id": str(row.id),
+                    "content": row.content,
+                    "document_name": row.filename,
+                    "element_type": row.element_type,
+                    "chunk_index": row.chunk_index,
+                    "token_count": row.token_count,
+                    "metadata": row.metadata_ or {},
+                }
+            )
             tokenized_corpus.append(row.content.lower().split())
 
         self._index = BM25Okapi(tokenized_corpus)
@@ -80,10 +80,15 @@ class SparseRetriever:
 
         Returns list of dicts with sparse_score field.
         """
-        with create_span(tracer, "sparse_retrieve", "RETRIEVER", {
-            "retriever.type": "bm25",
-            "retriever.top_k": top_k,
-        }):
+        with create_span(
+            tracer,
+            "sparse_retrieve",
+            "RETRIEVER",
+            {
+                "retriever.type": "bm25",
+                "retriever.top_k": top_k,
+            },
+        ):
             if self._index is None:
                 await self._build_index()
 
@@ -95,7 +100,7 @@ class SparseRetriever:
 
             scored_chunks = [
                 {**chunk, "sparse_score": float(score)}
-                for chunk, score in zip(self._chunks, scores)
+                for chunk, score in zip(self._chunks, scores, strict=True)
                 if score > 0
             ]
 

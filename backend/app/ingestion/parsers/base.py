@@ -7,11 +7,11 @@ Abstract parser with a factory for routing by MIME type.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 
 class ElementType(str, Enum):
     """Types of document elements preserved during parsing."""
+
     TITLE = "title"
     HEADING = "heading"
     PARAGRAPH = "paragraph"
@@ -27,16 +27,18 @@ class ElementType(str, Enum):
 @dataclass
 class ParsedElement:
     """A single element extracted from a document."""
+
     content: str
     element_type: ElementType
-    page_number: Optional[int] = None
-    section_path: Optional[str] = None
+    page_number: int | None = None
+    section_path: str | None = None
     metadata: dict = field(default_factory=dict)
 
 
 @dataclass
 class ParsedDocument:
     """Result of parsing a document — preserves element hierarchy."""
+
     filename: str
     elements: list[ParsedElement]
     page_count: int = 0

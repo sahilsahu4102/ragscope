@@ -7,13 +7,13 @@ that enforce citation from retrieved context. Supports SSE streaming.
 
 import json
 import time
-import structlog
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 import httpx
+import structlog
 
 from app.config import settings
-from app.observability.tracer import get_tracer, create_span
+from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
 tracer = get_tracer("generation")
@@ -54,7 +54,7 @@ def format_context(chunks: list[dict]) -> str:
 class Generator:
     """
     LLM generation service using self-hosted Ollama.
-    
+
     Produces grounded answers with structured citations,
     tracked with OpenInference LLM spans (tokens, latency, cost).
     """
@@ -70,7 +70,7 @@ class Generator:
     ) -> dict:
         """
         Generate a grounded answer with citations.
-        
+
         Returns: {"answer": str, "citations": list, "tokens": int, "latency_ms": float}
         """
         context = format_context(chunks)
@@ -78,11 +78,16 @@ class Generator:
 
         start = time.perf_counter()
 
-        with create_span(tracer, "llm_generate", "LLM", {
-            "gen_ai.system": "ollama",
-            "gen_ai.request.model": self.model,
-            "gen_ai.operation.name": "chat",
-        }):
+        with create_span(
+            tracer,
+            "llm_generate",
+            "LLM",
+            {
+                "gen_ai.system": "ollama",
+                "gen_ai.request.model": self.model,
+                "gen_ai.operation.name": "chat",
+            },
+        ):
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
                     f"{self.base_url}/api/generate",
@@ -129,14 +134,15 @@ class Generator:
     ) -> AsyncGenerator[str, None]:
         """
         Stream the generation via SSE-compatible token stream.
-        
+
         Yields JSON strings: {"token": "...", "done": false}
         """
         context = format_context(chunks)
         prompt = GROUNDED_QA_PROMPT.format(context=context, question=question)
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            async with client.stream(
+        async with (
+            httpx.AsyncClient(timeout=120.0) as client,
+            client.stream(
                 "POST",
                 f"{self.base_url}/api/generate",
                 json={
@@ -149,35 +155,43 @@ class Generator:
                         "num_predict": 2048,
                     },
                 },
-            ) as response:
-                async for line in response.aiter_lines():
-                    if line:
-                        data = json.loads(line)
-                        yield json.dumps({
+            ) as response,
+        ):
+            async for line in response.aiter_lines():
+                if line:
+                    data = json.loads(line)
+                    yield json.dumps(
+                        {
                             "token": data.get("response", ""),
                             "done": data.get("done", False),
-                        })
+                        }
+                    )
 
     @staticmethod
     def _extract_citations(answer: str, chunks: list[dict]) -> list[dict]:
         """Extract citation references [1], [2], etc. from the answer."""
         import re
+
         citations = []
         seen = set()
 
         # Find all [N] references in the answer
-        refs = re.findall(r'\[(\d+)\]', answer)
+        refs = re.findall(r"\[(\d+)\]", answer)
         for ref in refs:
             idx = int(ref) - 1  # Convert to 0-indexed
             if 0 <= idx < len(chunks) and idx not in seen:
                 seen.add(idx)
                 chunk = chunks[idx]
-                citations.append({
-                    "chunk_id": chunk.get("chunk_id", ""),
-                    "document_name": chunk.get("document_name", ""),
-                    "content_snippet": chunk["content"][:200] + "..." if len(chunk["content"]) > 200 else chunk["content"],
-                    "score": chunk.get("dense_score", 0),
-                    "page_number": chunk.get("metadata", {}).get("page_number"),
-                })
+                citations.append(
+                    {
+                        "chunk_id": chunk.get("chunk_id", ""),
+                        "document_name": chunk.get("document_name", ""),
+                        "content_snippet": chunk["content"][:200] + "..."
+                        if len(chunk["content"]) > 200
+                        else chunk["content"],
+                        "score": chunk.get("dense_score", 0),
+                        "page_number": chunk.get("metadata", {}).get("page_number"),
+                    }
+                )
 
         return citations

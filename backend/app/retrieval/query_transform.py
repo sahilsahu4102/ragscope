@@ -7,11 +7,11 @@ Pre-retrieval query optimization:
   3. Decomposition — break complex multi-hop questions into sub-queries
 """
 
-import structlog
 import httpx
+import structlog
 
 from app.config import settings
-from app.observability.tracer import get_tracer, create_span
+from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
 tracer = get_tracer("retrieval")
@@ -50,10 +50,15 @@ class QueryTransformer:
 
         Removes ambiguity, adds context, expands acronyms.
         """
-        with create_span(tracer, "query_rewrite", "CHAIN", {
-            "transform.type": "rewrite",
-            "transform.original_query": query,
-        }):
+        with create_span(
+            tracer,
+            "query_rewrite",
+            "CHAIN",
+            {
+                "transform.type": "rewrite",
+                "transform.original_query": query,
+            },
+        ):
             prompt = (
                 "You are a query optimization expert. Rewrite the following user "
                 "question to be more specific and effective for document retrieval.\n\n"
@@ -80,9 +85,14 @@ class QueryTransformer:
 
         Reference: Gao et al., 2023. "Precise Zero-Shot Dense Retrieval without Relevance Labels"
         """
-        with create_span(tracer, "query_hyde", "CHAIN", {
-            "transform.type": "hyde",
-        }):
+        with create_span(
+            tracer,
+            "query_hyde",
+            "CHAIN",
+            {
+                "transform.type": "hyde",
+            },
+        ):
             prompt = (
                 "You are a technical document expert. Write a short passage (3-5 sentences) "
                 "that would directly answer the following question. Write as if you are "
@@ -101,9 +111,14 @@ class QueryTransformer:
         E.g., "Compare X and Y's approach to Z" →
               ["What is X's approach to Z?", "What is Y's approach to Z?"]
         """
-        with create_span(tracer, "query_decompose", "CHAIN", {
-            "transform.type": "decompose",
-        }):
+        with create_span(
+            tracer,
+            "query_decompose",
+            "CHAIN",
+            {
+                "transform.type": "decompose",
+            },
+        ):
             prompt = (
                 "You are a research assistant. Break the following complex question "
                 "into 2-4 simpler sub-questions that, when answered individually, "

@@ -6,15 +6,12 @@ Returns ranked chunks with scores, traced with OpenInference RETRIEVER span.
 """
 
 import structlog
-from uuid import UUID
-
-from sqlalchemy import text, select
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Chunk, Document
 from app.ingestion.embedders.embedder import get_embedder
-from app.observability.tracer import get_tracer, create_span
+from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
 tracer = get_tracer("retrieval")
@@ -23,7 +20,7 @@ tracer = get_tracer("retrieval")
 class DenseRetriever:
     """
     Dense vector retrieval using pgvector cosine similarity.
-    
+
     Queries the chunks table with `<=>` (cosine distance) operator,
     returns top-k chunks ranked by similarity score.
     """
@@ -39,20 +36,30 @@ class DenseRetriever:
     ) -> list[dict]:
         """
         Retrieve top-k chunks most similar to the query.
-        
+
         Returns list of dicts with: chunk_id, content, score, document_name, metadata.
         """
         top_k = top_k or settings.retrieval_top_k
 
-        with create_span(tracer, "dense_retrieve", "RETRIEVER", {
-            "retriever.type": "dense",
-            "retriever.top_k": top_k,
-            "retriever.query": query,
-        }):
+        with create_span(
+            tracer,
+            "dense_retrieve",
+            "RETRIEVER",
+            {
+                "retriever.type": "dense",
+                "retriever.top_k": top_k,
+                "retriever.query": query,
+            },
+        ):
             # 1. Embed the query
-            with create_span(tracer, "embed_query", "EMBEDDING", {
-                "embedding.model_name": self.embedder.model_name(),
-            }):
+            with create_span(
+                tracer,
+                "embed_query",
+                "EMBEDDING",
+                {
+                    "embedding.model_name": self.embedder.model_name(),
+                },
+            ):
                 query_embeddings = await self.embedder.embed([query])
                 query_vector = query_embeddings[0]
 
@@ -84,16 +91,18 @@ class DenseRetriever:
 
             chunks = []
             for row in rows:
-                chunks.append({
-                    "chunk_id": str(row.id),
-                    "content": row.content,
-                    "document_name": row.document_name,
-                    "dense_score": float(row.score),
-                    "element_type": row.element_type,
-                    "chunk_index": row.chunk_index,
-                    "token_count": row.token_count,
-                    "metadata": row.metadata or {},
-                })
+                chunks.append(
+                    {
+                        "chunk_id": str(row.id),
+                        "content": row.content,
+                        "document_name": row.document_name,
+                        "dense_score": float(row.score),
+                        "element_type": row.element_type,
+                        "chunk_index": row.chunk_index,
+                        "token_count": row.token_count,
+                        "metadata": row.metadata or {},
+                    }
+                )
 
             logger.info(
                 "Dense retrieval complete",

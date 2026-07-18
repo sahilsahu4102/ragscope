@@ -8,11 +8,12 @@ When a child chunk matches during retrieval, we fetch the full
 parent for generation — best of both worlds.
 """
 
-import structlog
 from dataclasses import dataclass, field
 
-from app.ingestion.parsers.base import ParsedDocument
+import structlog
+
 from app.ingestion.chunkers.recursive_chunker import RecursiveChunker, TextChunk
+from app.ingestion.parsers.base import ParsedDocument
 
 logger = structlog.get_logger()
 
@@ -20,6 +21,7 @@ logger = structlog.get_logger()
 @dataclass
 class HierarchicalChunk:
     """A chunk with parent-child relationship."""
+
     content: str
     chunk_index: int
     token_count: int

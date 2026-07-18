@@ -1,5 +1,10 @@
 """RAGScope — Embedders package."""
 
-from app.ingestion.embedders.embedder import get_embedder, OllamaEmbedder, GeminiEmbedder, BaseEmbedder
+from app.ingestion.embedders.embedder import (
+    BaseEmbedder,
+    GeminiEmbedder,
+    OllamaEmbedder,
+    get_embedder,
+)
 
-__all__ = ["get_embedder", "OllamaEmbedder", "GeminiEmbedder", "BaseEmbedder"]
+__all__ = ["BaseEmbedder", "GeminiEmbedder", "OllamaEmbedder", "get_embedder"]

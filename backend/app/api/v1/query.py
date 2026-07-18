@@ -7,19 +7,19 @@ semantic caching, and configurable query transformation.
 
 import time
 import uuid
-import structlog
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
-from app.models import Query as QueryModel
-from app.schemas.schemas import QueryRequest, QueryResponse, Citation
-from app.retrieval.pipeline import RetrievalPipeline
-from app.generation.generator import Generator
 from app.caching.semantic_cache import SemanticCache
-from app.observability.tracer import get_tracer, create_span
+from app.db.session import get_db
+from app.generation.generator import Generator
+from app.models import Query as QueryModel
+from app.observability.tracer import create_span, get_tracer
+from app.retrieval.pipeline import RetrievalPipeline
+from app.schemas.schemas import Citation, QueryRequest, QueryResponse
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/query", tags=["query"])
@@ -47,12 +47,17 @@ async def query_rag(
     start = time.perf_counter()
     trace_id = uuid.uuid4().hex[:16]
 
-    with create_span(tracer, "rag_query", "CHAIN", {
-        "query.text": request.question,
-        "query.trace_id": trace_id,
-        "query.use_cache": request.use_cache,
-        "query.query_transform": request.query_transform,
-    }):
+    with create_span(
+        tracer,
+        "rag_query",
+        "CHAIN",
+        {
+            "query.text": request.question,
+            "query.trace_id": trace_id,
+            "query.use_cache": request.use_cache,
+            "query.query_transform": request.query_transform,
+        },
+    ):
         # ── 0. Semantic cache check ───────────────
         if request.use_cache:
             cached = await _semantic_cache.get(request.question)
@@ -168,9 +173,11 @@ async def query_rag_stream(
     if request.use_cache:
         cached = await _semantic_cache.get(request.question)
         if cached:
+
             async def cached_stream():
                 # Stream cached answer word by word for consistent UX
                 import json
+
                 for word in cached["answer"].split():
                     yield f"data: {json.dumps({'token': word + ' ', 'done': False})}\n\n"
                 yield f"data: {json.dumps({'token': '', 'done': True})}\n\n"

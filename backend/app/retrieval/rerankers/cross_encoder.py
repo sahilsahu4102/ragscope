@@ -9,11 +9,12 @@ Supports:
   - Ollama-based reranking (prompt-based)
 """
 
-import structlog
 from abc import ABC, abstractmethod
 
+import structlog
+
 from app.config import settings
-from app.observability.tracer import get_tracer, create_span
+from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
 tracer = get_tracer("retrieval")
@@ -33,8 +34,7 @@ class BaseReranker(ABC):
         ...
 
     @abstractmethod
-    def model_name(self) -> str:
-        ...
+    def model_name(self) -> str: ...
 
 
 class OllamaReranker(BaseReranker):
@@ -62,11 +62,16 @@ class OllamaReranker(BaseReranker):
         """Score and rerank chunks using Ollama LLM."""
         import httpx
 
-        with create_span(tracer, "rerank", "RERANKER", {
-            "reranker.model_name": self.model_name(),
-            "reranker.top_k": top_k,
-            "reranker.input_documents": len(chunks),
-        }):
+        with create_span(
+            tracer,
+            "rerank",
+            "RERANKER",
+            {
+                "reranker.model_name": self.model_name(),
+                "reranker.top_k": top_k,
+                "reranker.input_documents": len(chunks),
+            },
+        ):
             scored_chunks = []
 
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -93,7 +98,8 @@ class OllamaReranker(BaseReranker):
 
                         # Extract numeric score
                         import re
-                        match = re.search(r'(\d+\.?\d*)', text)
+
+                        match = re.search(r"(\d+\.?\d*)", text)
                         score = float(match.group(1)) / 10.0 if match else 0.0
                         score = min(1.0, max(0.0, score))
 
@@ -140,6 +146,7 @@ class CrossEncoderReranker(BaseReranker):
         if self._model is None:
             try:
                 from sentence_transformers import CrossEncoder
+
                 self._model = CrossEncoder(self._model_name)
                 logger.info("Cross-encoder loaded", model=self._model_name)
             except ImportError:
@@ -156,11 +163,16 @@ class CrossEncoderReranker(BaseReranker):
         top_k: int = 5,
     ) -> list[dict]:
         """Rerank using cross-encoder model."""
-        with create_span(tracer, "rerank_cross_encoder", "RERANKER", {
-            "reranker.model_name": self._model_name,
-            "reranker.top_k": top_k,
-            "reranker.input_documents": len(chunks),
-        }):
+        with create_span(
+            tracer,
+            "rerank_cross_encoder",
+            "RERANKER",
+            {
+                "reranker.model_name": self._model_name,
+                "reranker.top_k": top_k,
+                "reranker.input_documents": len(chunks),
+            },
+        ):
             model = self._load_model()
 
             if model is None:
@@ -172,7 +184,7 @@ class CrossEncoderReranker(BaseReranker):
             pairs = [(query, chunk["content"]) for chunk in chunks]
             scores = model.predict(pairs)
 
-            for chunk, score in zip(chunks, scores):
+            for chunk, score in zip(chunks, scores, strict=True):
                 chunk["rerank_score"] = round(float(score), 4)
 
             chunks.sort(key=lambda x: x["rerank_score"], reverse=True)

@@ -7,14 +7,14 @@ Now supports query transformation and RRF tuning.
 """
 
 import time
-import structlog
 
+import structlog
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.schemas.schemas import RetrieveRequest, RetrieveResponse, ChunkScore
 from app.retrieval.pipeline import RetrievalPipeline
+from app.schemas.schemas import ChunkScore, RetrieveRequest, RetrieveResponse
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/retrieve", tags=["retrieval"])

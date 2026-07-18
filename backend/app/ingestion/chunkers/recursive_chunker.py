@@ -2,14 +2,15 @@
 RAGScope — Recursive Text Chunker
 
 Configurable recursive character text splitter with metadata preservation.
-The workhorse chunker — a strong baseline that placed first (69% accuracy) 
+The workhorse chunker — a strong baseline that placed first (69% accuracy)
 in a Feb-2026 Vecta benchmark of 7 strategies.
 """
 
-import structlog
 from dataclasses import dataclass, field
 
-from app.ingestion.parsers.base import ParsedDocument, ParsedElement
+import structlog
+
+from app.ingestion.parsers.base import ParsedDocument
 
 logger = structlog.get_logger()
 
@@ -17,6 +18,7 @@ logger = structlog.get_logger()
 @dataclass
 class TextChunk:
     """A chunk of text ready for embedding."""
+
     content: str
     chunk_index: int
     token_count: int
@@ -31,7 +33,7 @@ class TextChunk:
 class RecursiveChunker:
     """
     Recursive character text splitter.
-    
+
     Splits text hierarchically using separators (paragraphs → sentences → words),
     with configurable chunk size and overlap.
     """
@@ -70,21 +72,23 @@ class RecursiveChunker:
 
                 token_count = self._estimate_tokens(piece)
 
-                all_chunks.append(TextChunk(
-                    content=piece,
-                    chunk_index=chunk_index,
-                    token_count=token_count,
-                    document_name=parsed_doc.filename,
-                    element_type=element.element_type.value if element.element_type else None,
-                    page_number=element.page_number,
-                    section_path=element.section_path,
-                    metadata={
-                        **element.metadata,
-                        "chunk_size": self.chunk_size,
-                        "chunk_overlap": self.chunk_overlap,
-                        "chunker": "recursive",
-                    },
-                ))
+                all_chunks.append(
+                    TextChunk(
+                        content=piece,
+                        chunk_index=chunk_index,
+                        token_count=token_count,
+                        document_name=parsed_doc.filename,
+                        element_type=element.element_type.value if element.element_type else None,
+                        page_number=element.page_number,
+                        section_path=element.section_path,
+                        metadata={
+                            **element.metadata,
+                            "chunk_size": self.chunk_size,
+                            "chunk_overlap": self.chunk_overlap,
+                            "chunker": "recursive",
+                        },
+                    )
+                )
                 chunk_index += 1
 
         logger.info(
@@ -129,9 +133,7 @@ class RecursiveChunker:
 
                     # If chunk is still too large, recurse with next separator
                     if len(chunk_text) > self.chunk_size and len(separators) > 1:
-                        final_chunks.extend(
-                            self._split_text(chunk_text, separators[1:])
-                        )
+                        final_chunks.extend(self._split_text(chunk_text, separators[1:]))
                     else:
                         final_chunks.append(chunk_text)
 
@@ -153,9 +155,7 @@ class RecursiveChunker:
         if current_chunk:
             chunk_text = separator.join(current_chunk)
             if len(chunk_text) > self.chunk_size and len(separators) > 1:
-                final_chunks.extend(
-                    self._split_text(chunk_text, separators[1:])
-                )
+                final_chunks.extend(self._split_text(chunk_text, separators[1:]))
             else:
                 final_chunks.append(chunk_text)
 

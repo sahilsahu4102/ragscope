@@ -8,18 +8,17 @@ return the cached answer instead of re-running the full pipeline.
 Reduces LLM costs by 40-60% on production traffic with repeated knowledge queries.
 """
 
-import json
 import hashlib
+import json
 import time
-import structlog
-from typing import Optional
 
-import redis.asyncio as redis
 import numpy as np
+import redis.asyncio as redis
+import structlog
 
 from app.config import settings
 from app.ingestion.embedders.embedder import get_embedder
-from app.observability.tracer import get_tracer, create_span
+from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
 tracer = get_tracer("caching")
@@ -48,7 +47,7 @@ class SemanticCache:
         self.threshold = similarity_threshold
         self.ttl = ttl_seconds
         self.embedder = get_embedder()
-        self._redis: Optional[redis.Redis] = None
+        self._redis: redis.Redis | None = None
 
     async def _get_redis(self) -> redis.Redis:
         """Get or create Redis connection."""
@@ -59,16 +58,21 @@ class SemanticCache:
             )
         return self._redis
 
-    async def get(self, query: str) -> Optional[dict]:
+    async def get(self, query: str) -> dict | None:
         """
         Check if a semantically similar query is cached.
 
         Returns cached response dict or None.
         """
-        with create_span(tracer, "cache_lookup", "CHAIN", {
-            "cache.type": "semantic",
-            "cache.threshold": self.threshold,
-        }):
+        with create_span(
+            tracer,
+            "cache_lookup",
+            "CHAIN",
+            {
+                "cache.type": "semantic",
+                "cache.threshold": self.threshold,
+            },
+        ):
             try:
                 r = await self._get_redis()
 
@@ -81,7 +85,7 @@ class SemanticCache:
                 if not keys:
                     return None
 
-                best_match: Optional[dict] = None
+                best_match: dict | None = None
                 best_similarity = 0.0
 
                 for key in keys:

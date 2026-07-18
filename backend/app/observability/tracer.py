@@ -6,12 +6,12 @@ Wired from Phase 0 so every query is traced from day one.
 """
 
 from opentelemetry import trace
+from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
     BatchSpanProcessor,
     ConsoleSpanExporter,
 )
-from opentelemetry.sdk.resources import Resource
 
 # OpenInference span kind attribute key
 OTEL_SPAN_KIND_KEY = "openinference.span.kind"

@@ -6,17 +6,17 @@ Wrapped in OpenInference CHAIN span for end-to-end tracing.
 """
 
 import uuid
-import structlog
 from pathlib import Path
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Document, Chunk
-from app.ingestion.parsers.pdf_parser import PDFParser
 from app.ingestion.chunkers.recursive_chunker import RecursiveChunker
 from app.ingestion.embedders.embedder import get_embedder
-from app.observability.tracer import get_tracer, create_span
+from app.ingestion.parsers.pdf_parser import PDFParser
+from app.models import Chunk, Document
+from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
 tracer = get_tracer("ingestion")
@@ -25,7 +25,7 @@ tracer = get_tracer("ingestion")
 class IngestionPipeline:
     """
     End-to-end document ingestion: parse → chunk → embed → store.
-    
+
     Each step is traced with OpenInference spans for observability from day one.
     """
 
@@ -45,16 +45,21 @@ class IngestionPipeline:
     ) -> Document:
         """
         Ingest a document end-to-end.
-        
+
         Returns the Document record with all chunks created and embedded.
         """
         path = Path(file_path)
         doc_id = document_id or uuid.uuid4()
 
-        with create_span(tracer, "ingestion_pipeline", "CHAIN", {
-            "document.filename": path.name,
-            "document.id": str(doc_id),
-        }):
+        with create_span(
+            tracer,
+            "ingestion_pipeline",
+            "CHAIN",
+            {
+                "document.filename": path.name,
+                "document.id": str(doc_id),
+            },
+        ):
             # ── 1. Create Document record ─────────────
             document = Document(
                 id=doc_id,
@@ -68,20 +73,28 @@ class IngestionPipeline:
 
             try:
                 # ── 2. Parse ──────────────────────────
-                with create_span(tracer, "parse_document", "CHAIN", {
-                    "parser.type": "pdf_layout",
-                }):
-                    parsed_doc = await self.parser.parse(
-                        str(path), document.mime_type
-                    )
+                with create_span(
+                    tracer,
+                    "parse_document",
+                    "CHAIN",
+                    {
+                        "parser.type": "pdf_layout",
+                    },
+                ):
+                    parsed_doc = await self.parser.parse(str(path), document.mime_type)
                     document.page_count = parsed_doc.page_count
 
                 # ── 3. Chunk ──────────────────────────
-                with create_span(tracer, "chunk_document", "CHAIN", {
-                    "chunker.type": "recursive",
-                    "chunker.chunk_size": settings.default_chunk_size,
-                    "chunker.chunk_overlap": settings.default_chunk_overlap,
-                }):
+                with create_span(
+                    tracer,
+                    "chunk_document",
+                    "CHAIN",
+                    {
+                        "chunker.type": "recursive",
+                        "chunker.chunk_size": settings.default_chunk_size,
+                        "chunker.chunk_overlap": settings.default_chunk_overlap,
+                    },
+                ):
                     text_chunks = self.chunker.chunk_document(parsed_doc)
 
                 if not text_chunks:
@@ -91,18 +104,28 @@ class IngestionPipeline:
                     return document
 
                 # ── 4. Embed ──────────────────────────
-                with create_span(tracer, "embed_chunks", "EMBEDDING", {
-                    "embedding.model_name": self.embedder.model_name(),
-                    "embedding.dimension": self.embedder.dimension(),
-                    "embedding.chunk_count": len(text_chunks),
-                }):
+                with create_span(
+                    tracer,
+                    "embed_chunks",
+                    "EMBEDDING",
+                    {
+                        "embedding.model_name": self.embedder.model_name(),
+                        "embedding.dimension": self.embedder.dimension(),
+                        "embedding.chunk_count": len(text_chunks),
+                    },
+                ):
                     texts_to_embed = [chunk.content for chunk in text_chunks]
                     embeddings = await self.embedder.embed(texts_to_embed)
 
                 # ── 5. Store in pgvector ──────────────
-                with create_span(tracer, "store_chunks", "CHAIN", {
-                    "store.chunk_count": len(text_chunks),
-                }):
+                with create_span(
+                    tracer,
+                    "store_chunks",
+                    "CHAIN",
+                    {
+                        "store.chunk_count": len(text_chunks),
+                    },
+                ):
                     for chunk_data, embedding in zip(text_chunks, embeddings):
                         chunk = Chunk(
                             document_id=doc_id,
