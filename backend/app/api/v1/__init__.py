@@ -6,7 +6,16 @@ Aggregates all v1 endpoint routers.
 
 from fastapi import APIRouter
 
+from app.api.v1.ingest import router as ingest_router
+from app.api.v1.query import router as query_router
+from app.api.v1.retrieve import router as retrieve_router
+
 router = APIRouter(tags=["v1"])
+
+# Mount endpoint routers
+router.include_router(ingest_router)
+router.include_router(query_router)
+router.include_router(retrieve_router)
 
 
 @router.get("/")
