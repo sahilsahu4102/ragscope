@@ -1,9 +1,9 @@
 """
-RAGScope — Retrieve Debug API Router
+RAGScope — Retrieve Debug API Router (Phase 2)
 
 Debug endpoint that returns retrieved chunks with per-stage scores
 (dense, sparse, RRF, rerank) without triggering generation.
-The "Retrieval Inspector" backend.
+Now supports query transformation and RRF tuning.
 """
 
 import time
@@ -27,9 +27,15 @@ async def retrieve_debug(
 ):
     """
     Debug retrieval — returns chunks with all intermediate scores.
-    
+
     No generation is performed. This powers the Retrieval Inspector
     page, showing how chunks flow through dense → sparse → RRF → rerank.
+
+    Supports:
+      - Query transformation (rewrite, HyDE, decompose)
+      - Hybrid mode toggle (dense-only vs dense+sparse+RRF)
+      - Reranker toggle
+      - RRF constant tuning
     """
     start = time.perf_counter()
 
@@ -39,6 +45,8 @@ async def retrieve_debug(
         top_k=request.top_k,
         use_hybrid=request.use_hybrid,
         use_reranker=request.use_reranker,
+        query_transform=request.query_transform,
+        rrf_k=request.rrf_k,
     )
 
     latency_ms = (time.perf_counter() - start) * 1000
@@ -52,6 +60,8 @@ async def retrieve_debug(
             sparse_score=c.get("sparse_score"),
             rrf_score=c.get("rrf_score"),
             rerank_score=c.get("rerank_score"),
+            element_type=c.get("element_type"),
+            page_number=c.get("metadata", {}).get("page_number"),
         )
         for c in chunks
     ]
@@ -60,6 +70,9 @@ async def retrieve_debug(
         "Debug retrieval complete",
         question_length=len(request.question),
         results=len(chunk_scores),
+        mode="hybrid" if request.use_hybrid else "dense",
+        reranked=request.use_reranker,
+        query_transform=request.query_transform,
         latency_ms=round(latency_ms, 1),
     )
 
