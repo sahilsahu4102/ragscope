@@ -95,6 +95,8 @@ class Chunk(Base):
     __table_args__ = (
         Index("ix_chunks_document_id", "document_id"),
         Index("ix_chunks_parent_id", "parent_id"),
+        Index("ix_chunks_element_type", "element_type"),
+        Index("ix_chunks_created_at", "created_at"),
     )
 
 
