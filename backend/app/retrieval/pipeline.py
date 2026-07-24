@@ -51,6 +51,7 @@ class RetrievalPipeline:
         use_reranker: bool = False,
         query_transform: str = "none",
         rrf_k: int = 60,
+        filters: dict | None = None,
     ) -> list[dict]:
         """
         Run the full retrieval pipeline.
@@ -62,6 +63,7 @@ class RetrievalPipeline:
             use_reranker: Whether to apply cross-encoder reranking
             query_transform: "none", "rewrite", "hyde", or "decompose"
             rrf_k: RRF constant (default 60)
+            filters: Optional metadata pre-filters dict
 
         Returns:
             Ranked list of chunk dicts with scores from each stage.
@@ -76,6 +78,7 @@ class RetrievalPipeline:
                 "retrieval.query_transform": query_transform,
                 "retrieval.top_k": top_k,
                 "retrieval.rrf_k": rrf_k,
+                "retrieval.has_filters": bool(filters),
             },
         ):
             # ── 1. Query transformation ──────────────
@@ -109,6 +112,7 @@ class RetrievalPipeline:
                 dense_results = await self.dense_retriever.retrieve(
                     query=effective_query,
                     top_k=fetch_k,
+                    filters=filters,
                 )
                 candidates = dense_results
             else:
@@ -120,6 +124,7 @@ class RetrievalPipeline:
                     self.dense_retriever.retrieve(
                         query=effective_query,
                         top_k=fetch_k,
+                        filters=filters,
                     ),
                     self.sparse_retriever.retrieve(
                         query=effective_query,

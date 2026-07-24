@@ -47,6 +47,7 @@ async def retrieve_debug(
         use_reranker=request.use_reranker,
         query_transform=request.query_transform,
         rrf_k=request.rrf_k,
+        filters=request.filters.model_dump(exclude_none=True) if request.filters else None,
     )
 
     latency_ms = (time.perf_counter() - start) * 1000

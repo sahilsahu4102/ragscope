@@ -40,6 +40,36 @@ class IngestStatusResponse(BaseModel):
 # ── Query ─────────────────────────────────────
 
 
+class RetrievalFilters(BaseModel):
+    """Metadata pre-filters for staged hybrid retrieval.
+
+    Stage 1 (indexed, pre-filter): document_ids, element_types, date_from, date_to
+    Stage 3 (post-filter): min_score, min_tokens, max_tokens
+    """
+
+    document_ids: list[str] | None = Field(
+        default=None, description="Restrict retrieval to specific document IDs"
+    )
+    element_types: list[str] | None = Field(
+        default=None, description="Filter by chunk type: paragraph | table | title | list"
+    )
+    date_from: str | None = Field(
+        default=None, description="ISO date — only documents created after this date"
+    )
+    date_to: str | None = Field(
+        default=None, description="ISO date — only documents created before this date"
+    )
+    min_score: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Minimum cosine similarity threshold"
+    )
+    min_tokens: int | None = Field(
+        default=None, ge=1, description="Minimum chunk token count"
+    )
+    max_tokens: int | None = Field(
+        default=None, ge=1, description="Maximum chunk token count"
+    )
+
+
 class QueryRequest(BaseModel):
     """A user query to the RAG pipeline."""
 
@@ -53,6 +83,9 @@ class QueryRequest(BaseModel):
         description="Query transformation: none | rewrite | hyde | decompose",
     )
     use_cache: bool = Field(default=True, description="Check semantic cache before pipeline")
+    filters: RetrievalFilters | None = Field(
+        default=None, description="Metadata pre-filters for staged hybrid retrieval"
+    )
 
 
 class Citation(BaseModel):
@@ -103,6 +136,9 @@ class RetrieveRequest(BaseModel):
     use_hybrid: bool = True
     query_transform: str = Field(default="none", description="none | rewrite | hyde | decompose")
     rrf_k: int = Field(default=60, ge=10, le=200, description="RRF constant")
+    filters: RetrievalFilters | None = Field(
+        default=None, description="Metadata pre-filters for staged hybrid retrieval"
+    )
 
 
 class RetrieveResponse(BaseModel):
