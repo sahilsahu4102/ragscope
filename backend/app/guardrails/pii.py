@@ -1,0 +1,125 @@
+"""
+RAGScope — PII Redaction Guard (Phase 5)
+
+Regex-based PII detector and redactor. Scans both input queries and
+output answers to redact sensitive data before storage or display.
+
+Detected patterns:
+  - Email addresses
+  - Phone numbers (US/international)
+  - Social Security Numbers
+  - Credit card numbers
+  - IP addresses (IPv4)
+
+No external dependencies — pure regex implementation.
+"""
+
+from __future__ import annotations
+
+import re
+
+import structlog
+
+logger = structlog.get_logger()
+
+# ── PII Patterns ─────────────────────────────────
+_PII_PATTERNS: list[tuple[str, str, re.Pattern]] = [
+    (
+        "email",
+        "[EMAIL_REDACTED]",
+        re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
+    ),
+    (
+        "phone_us",
+        "[PHONE_REDACTED]",
+        re.compile(
+            r"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"
+        ),
+    ),
+    (
+        "phone_intl",
+        "[PHONE_REDACTED]",
+        re.compile(r"\+\d{1,3}[-.\s]?\d{2,4}[-.\s]?\d{4,10}\b"),
+    ),
+    (
+        "ssn",
+        "[SSN_REDACTED]",
+        re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    ),
+    (
+        "credit_card",
+        "[CC_REDACTED]",
+        re.compile(
+            r"\b(?:\d{4}[-\s]?){3}\d{4}\b"
+        ),
+    ),
+    (
+        "ipv4",
+        "[IP_REDACTED]",
+        re.compile(
+            r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"
+        ),
+    ),
+]
+
+
+class PIIRedactor:
+    """
+    Scans text for PII patterns and redacts them with placeholders.
+
+    Usage:
+        redactor = PIIRedactor()
+        clean_text, found = redactor.redact("Contact me at john@example.com")
+        # clean_text = "Contact me at [EMAIL_REDACTED]"
+        # found = [{"type": "email", "original": "john@example.com"}]
+    """
+
+    def __init__(self, patterns: list[tuple[str, str, re.Pattern]] | None = None):
+        self.patterns = patterns or _PII_PATTERNS
+
+    def scan(self, text: str) -> list[dict]:
+        """Scan text for PII without redacting. Returns list of findings."""
+        findings: list[dict] = []
+        for pii_type, _, pattern in self.patterns:
+            for match in pattern.finditer(text):
+                findings.append({
+                    "type": pii_type,
+                    "original": match.group(),
+                    "start": match.start(),
+                    "end": match.end(),
+                })
+        return findings
+
+    def redact(self, text: str) -> tuple[str, list[dict]]:
+        """Redact PII from text. Returns (cleaned_text, findings)."""
+        findings: list[dict] = []
+        redacted = text
+
+        for pii_type, replacement, pattern in self.patterns:
+            matches = list(pattern.finditer(redacted))
+            for match in reversed(matches):  # Reverse to preserve positions
+                findings.append({
+                    "type": pii_type,
+                    "original": match.group(),
+                })
+                redacted = (
+                    redacted[: match.start()]
+                    + replacement
+                    + redacted[match.end() :]
+                )
+
+        if findings:
+            logger.info(
+                "PII redacted",
+                count=len(findings),
+                types=[f["type"] for f in findings],
+            )
+
+        return redacted, findings
+
+    def contains_pii(self, text: str) -> bool:
+        """Quick check — does the text contain any PII?"""
+        for _, _, pattern in self.patterns:
+            if pattern.search(text):
+                return True
+        return False

@@ -99,5 +99,39 @@ class Settings(BaseSettings):
         description="Optional OTLP HTTP endpoint to forward spans to",
     )
 
+    # ── Guardrails (Phase 5) ─────────────────────
+    enable_pii_redaction: bool = Field(
+        default=True,
+        description="Redact PII (email, phone, SSN, CC, IP) from queries and answers",
+    )
+    enable_injection_detection: bool = Field(
+        default=True,
+        description="Detect and block prompt injection attempts",
+    )
+    enable_hallucination_detection: bool = Field(
+        default=True,
+        description="Score answer groundedness and flag hallucinations",
+    )
+    injection_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Confidence threshold for blocking injections (0-1)",
+    )
+    hallucination_threshold: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Groundedness threshold below which answers are flagged (0-1)",
+    )
+
+    # ── Connection Pool Tuning ────────────────────
+    db_pool_size: int = Field(default=10, description="SQLAlchemy pool_size")
+    db_max_overflow: int = Field(default=20, description="SQLAlchemy max_overflow")
+    db_pool_recycle: int = Field(
+        default=1800,
+        description="Recycle connections after N seconds (prevents stale connections)",
+    )
+
 
 settings = Settings()

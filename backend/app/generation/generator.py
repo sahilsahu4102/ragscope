@@ -9,7 +9,6 @@ import json
 import time
 from collections.abc import AsyncGenerator
 
-import httpx
 import structlog
 from opentelemetry import trace as otel_trace
 
@@ -90,22 +89,24 @@ class Generator:
                 "gen_ai.operation.name": "chat",
             },
         ):
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/generate",
-                    json={
-                        "model": self.model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {
-                            "temperature": 0.3,
-                            "top_p": 0.9,
-                            "num_predict": 2048,
-                        },
+            from app.http_client import get_http_client
+
+            client = get_http_client()
+            response = await client.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "top_p": 0.9,
+                        "num_predict": 2048,
                     },
-                )
-                response.raise_for_status()
-                data = response.json()
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
 
             # Attach token usage + cost to the LLM span for trace/analytics.
             input_tokens = data.get("prompt_eval_count", 0)
@@ -159,9 +160,13 @@ class Generator:
         context = format_context(chunks)
         prompt = GROUNDED_QA_PROMPT.format(context=context, question=question)
 
+        import httpx as _httpx
+
+        # Streaming requires its own client context since the response body
+        # is consumed lazily; the shared pool is still used for non-stream.
         async with (
-            httpx.AsyncClient(timeout=120.0) as client,
-            client.stream(
+            _httpx.AsyncClient(timeout=120.0) as stream_client,
+            stream_client.stream(
                 "POST",
                 f"{self.base_url}/api/generate",
                 json={

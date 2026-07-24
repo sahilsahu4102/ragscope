@@ -7,10 +7,10 @@ Pre-retrieval query optimization:
   3. Decomposition — break complex multi-hop questions into sub-queries
 """
 
-import httpx
 import structlog
 
 from app.config import settings
+from app.http_client import get_http_client
 from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
@@ -30,19 +30,19 @@ class QueryTransformer:
         self.base_url = settings.ollama_base_url
 
     async def _llm_call(self, prompt: str) -> str:
-        """Make a single Ollama LLM call."""
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{self.base_url}/api/generate",
-                json={
-                    "model": self.model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {"temperature": 0.3, "num_predict": 512},
-                },
-            )
-            response.raise_for_status()
-            return response.json().get("response", "").strip()
+        """Make a single Ollama LLM call using the shared connection pool."""
+        client = get_http_client()
+        response = await client.post(
+            f"{self.base_url}/api/generate",
+            json={
+                "model": self.model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0.3, "num_predict": 512},
+            },
+        )
+        response.raise_for_status()
+        return response.json().get("response", "").strip()
 
     async def rewrite(self, query: str) -> str:
         """

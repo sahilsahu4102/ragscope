@@ -1,8 +1,11 @@
 """
-RAGScope — Query API Router (Phase 2)
+RAGScope — Query API Router (Phase 5)
 
 Endpoints for RAG question-answering with citations, SSE streaming,
-semantic caching, and configurable query transformation.
+semantic caching, configurable query transformation, and guardrails.
+
+Phase 5: Integrated guardrails pipeline (PII redaction, injection
+detection, hallucination scoring) into the query path.
 """
 
 import time
@@ -16,7 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.caching.semantic_cache import SemanticCache
 from app.db.session import get_db
+from app.config import settings
 from app.generation.generator import Generator
+from app.guardrails import GuardrailsPipeline
 from app.models import Query as QueryModel
 from app.observability.collector import persist_trace
 from app.observability.tracer import create_span, get_current_trace_id, get_tracer
@@ -27,8 +32,13 @@ logger = structlog.get_logger()
 router = APIRouter(prefix="/query", tags=["query"])
 tracer = get_tracer("query")
 
-# Module-level cache instance (shared across requests)
+# Module-level instances (shared across requests)
 _semantic_cache = SemanticCache()
+_guardrails = GuardrailsPipeline(
+    enable_pii=getattr(settings, "enable_pii_redaction", True),
+    enable_injection=getattr(settings, "enable_injection_detection", True),
+    enable_hallucination=getattr(settings, "enable_hallucination_detection", True),
+)
 
 
 @router.post("", response_model=QueryResponse)
@@ -63,9 +73,19 @@ async def query_rag(
         trace_id = get_current_trace_id() or uuid.uuid4().hex[:16]
         otel_trace.get_current_span().set_attribute("query.trace_id", trace_id)
 
-        # ── 0. Semantic cache check ───────────────
+        # ── 0a. Guardrails — input validation ────
+        input_check = _guardrails.check_input(request.question)
+        if input_check["blocked"]:
+            raise HTTPException(
+                status_code=400,
+                detail=input_check["reason"],
+            )
+        # Use PII-redacted query for pipeline
+        safe_question = input_check["redacted_query"]
+
+        # ── 0b. Semantic cache check ──────────────
         if request.use_cache:
-            cached = await _semantic_cache.get(request.question)
+            cached = await _semantic_cache.get(safe_question)
             if cached:
                 latency_ms = (time.perf_counter() - start) * 1000
                 logger.info(
@@ -86,7 +106,7 @@ async def query_rag(
         # ── 1. Retrieve ──────────────────────────
         retrieval_pipeline = RetrievalPipeline(db)
         chunks = await retrieval_pipeline.retrieve(
-            query=request.question,
+            query=safe_question,
             top_k=request.top_k,
             use_hybrid=request.use_hybrid,
             use_reranker=request.use_reranker,
@@ -102,15 +122,22 @@ async def query_rag(
         # ── 2. Generate ──────────────────────────
         generator = Generator()
         result = await generator.generate(
-            question=request.question,
+            question=safe_question,
             chunks=chunks,
         )
+
+        # ── 2b. Guardrails — output validation ───
+        output_check = await _guardrails.check_output(
+            answer=result["answer"],
+            context_chunks=chunks,
+        )
+        result["answer"] = output_check["redacted_answer"]
 
         latency_ms = (time.perf_counter() - start) * 1000
 
         # ── 3. Store query record ─────────────────
         query_record = QueryModel(
-            text=request.question,
+            text=safe_question,
             answer=result["answer"],
             citations=result["citations"],
             trace_id=trace_id,
@@ -143,7 +170,7 @@ async def query_rag(
         # ── 4. Cache the result ───────────────────
         if request.use_cache:
             await _semantic_cache.put(
-                query=request.question,
+                query=safe_question,
                 answer=result["answer"],
                 citations=result["citations"],
                 latency_ms=round(latency_ms, 1),
