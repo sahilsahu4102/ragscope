@@ -8,6 +8,7 @@ Phase 5: Added GZip compression, request timing middleware,
 proper readiness probe (DB + Redis), and HTTP client lifecycle.
 """
 
+import asyncio
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -38,6 +39,28 @@ class TimingMiddleware(BaseHTTPMiddleware):
         return response
 
 
+async def _warm_reranker(logger) -> None:
+    """Load the cross-encoder checkpoint ahead of the first request."""
+    try:
+        from app.retrieval.rerankers import get_reranker
+
+        reranker = get_reranker()
+        get_model = getattr(reranker, "_get_model", None)
+        if get_model is None:
+            return  # Ollama backend — nothing to preload.
+        start = time.perf_counter()
+        if await get_model() is not None:
+            logger.info(
+                "Reranker warmed",
+                model=reranker.model_name(),
+                load_ms=round((time.perf_counter() - start) * 1000, 1),
+            )
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.warning("Reranker warmup failed", error=str(e))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan — startup and shutdown hooks."""
@@ -53,9 +76,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         otlp_endpoint=settings.otlp_endpoint,
     )
     await init_db()
+
+    # Warm the reranker in the background so the first query doesn't pay the
+    # checkpoint load. Fire-and-forget: a failure here degrades to the Ollama
+    # fallback rather than blocking startup.
+    warmup_task = asyncio.create_task(_warm_reranker(logger))
+
     logger.info("RAGScope ready", api_version="v1", version="1.0.0")
 
     yield
+
+    warmup_task.cancel()
 
     # ── Shutdown ──────────────────────────────
     logger.info("Shutting down RAGScope")
@@ -104,6 +135,7 @@ def create_app() -> FastAPI:
         # Check PostgreSQL
         try:
             from sqlalchemy import text
+
             from app.db.session import async_session
             async with async_session() as session:
                 await session.execute(text("SELECT 1"))

@@ -176,6 +176,10 @@ async def persist_trace(
 
         for rs in readable:
             ctx = rs.get_span_context()
+            if ctx is None:
+                # Non-recording / invalid spans carry no context. Skipping keeps
+                # trace persistence from raising on an attribute that isn't there.
+                continue
             attrs = _jsonable_attributes(rs)
             start_dt = _ns_to_dt(rs.start_time)
             end_dt = _ns_to_dt(rs.end_time)

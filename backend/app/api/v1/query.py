@@ -12,14 +12,14 @@ import time
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from opentelemetry import trace as otel_trace
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.caching.semantic_cache import SemanticCache
-from app.db.session import get_db
 from app.config import settings
+from app.db.session import async_session, get_db
 from app.generation.generator import Generator
 from app.guardrails import GuardrailsPipeline
 from app.models import Query as QueryModel
@@ -44,6 +44,7 @@ _guardrails = GuardrailsPipeline(
 @router.post("", response_model=QueryResponse)
 async def query_rag(
     request: QueryRequest,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -127,11 +128,9 @@ async def query_rag(
             chunks=chunks,
         )
 
-        # ── 2b. Guardrails — output validation ───
-        output_check = await _guardrails.check_output(
-            answer=result["answer"],
-            context_chunks=chunks,
-        )
+        # ── 2b. Guardrails — PII redaction only (fast, regex) ───
+        # Groundedness scoring is an LLM call and runs post-response below.
+        output_check = _guardrails.redact_output(result["answer"])
         result["answer"] = output_check["redacted_answer"]
 
         latency_ms = (time.perf_counter() - start) * 1000
@@ -169,15 +168,6 @@ async def query_rag(
         await db.refresh(query_record)
         query_id = str(query_record.id)
 
-        # ── 4. Cache the result ───────────────────
-        if request.use_cache:
-            await _semantic_cache.put(
-                query=safe_question,
-                answer=result["answer"],
-                citations=result["citations"],
-                latency_ms=round(latency_ms, 1),
-            )
-
         logger.info(
             "RAG query complete",
             trace_id=trace_id,
@@ -194,9 +184,73 @@ async def query_rag(
             tokens_used=result.get("tokens_used"),
         )
 
-    # Persist the full span tree after the root span has ended.
-    await persist_trace(db, trace_id, query_id=query_id)
+    # Everything below observes the answer rather than shaping it, so it runs
+    # after the response is flushed: groundedness scoring (an LLM call),
+    # semantic-cache write, and span persistence.
+    background.add_task(
+        _post_response_work,
+        trace_id=trace_id,
+        query_id=query_id,
+        question=safe_question,
+        answer=result["answer"],
+        citations=result["citations"],
+        chunks=chunks,
+        latency_ms=round(latency_ms, 1),
+        use_cache=request.use_cache,
+    )
     return response
+
+
+async def _post_response_work(
+    trace_id: str,
+    query_id: str | None,
+    question: str,
+    answer: str,
+    citations: list[dict],
+    chunks: list[dict],
+    latency_ms: float,
+    use_cache: bool,
+) -> None:
+    """Post-response work. Runs after the client has its answer.
+
+    Failures here are logged, never raised — the user already has a valid
+    response and must not be affected by observability work.
+    """
+    # ── Groundedness / hallucination scoring ──
+    try:
+        hallucination = await _guardrails.score_groundedness(
+            answer=answer,
+            context_chunks=chunks,
+        )
+        if hallucination:
+            logger.info(
+                "Groundedness scored",
+                trace_id=trace_id,
+                score=hallucination.get("groundedness_score"),
+                is_hallucination=hallucination.get("is_hallucination"),
+            )
+    except Exception as e:
+        logger.warning("Groundedness scoring failed", trace_id=trace_id, error=str(e))
+
+    # ── Semantic cache write ──────────────────
+    if use_cache:
+        try:
+            await _semantic_cache.put(
+                query=question,
+                answer=answer,
+                citations=citations,
+                latency_ms=latency_ms,
+            )
+        except Exception as e:
+            logger.warning("Cache store failed", trace_id=trace_id, error=str(e))
+
+    # ── Span persistence ──────────────────────
+    # Needs its own session: the request-scoped one is closed by now.
+    try:
+        async with async_session() as session:
+            await persist_trace(session, trace_id, query_id=query_id)
+    except Exception as e:
+        logger.warning("Trace persistence failed", trace_id=trace_id, error=str(e))
 
 
 @router.post("/stream")

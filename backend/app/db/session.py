@@ -4,6 +4,8 @@ RAGScope — Database Session & Engine
 Async SQLAlchemy engine with pgvector extension registration.
 """
 
+from collections.abc import AsyncGenerator
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -39,7 +41,7 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — yields an async DB session."""
     async with async_session() as session:
         try:

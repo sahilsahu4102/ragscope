@@ -141,7 +141,10 @@ class RetrievalPipeline:
 
             # ── 5. Reranking ─────────────────────────
             if use_reranker and candidates:
-                reranker = get_reranker(use_cross_encoder=False)
+                # Backend comes from settings.reranker_backend (default:
+                # cross_encoder). Was hardcoded to the Ollama LLM reranker,
+                # which measured 62-67s per query.
+                reranker = get_reranker()
                 candidates = await reranker.rerank(
                     query=effective_query,
                     chunks=candidates,

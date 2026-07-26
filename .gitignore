@@ -51,3 +51,6 @@ ollama_data/
 
 # Redis
 dump.rdb
+
+# Local benchmark/test corpus (large public PDFs, re-downloadable)
+test_docs/

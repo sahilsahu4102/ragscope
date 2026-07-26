@@ -6,6 +6,8 @@ trace list and the span-waterfall viewer.
 """
 
 import uuid
+from datetime import datetime
+from typing import overload
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,7 +22,13 @@ logger = structlog.get_logger()
 router = APIRouter(prefix="/traces", tags=["traces"])
 
 
-def _iso(dt) -> str | None:
+# Overloaded so non-nullable columns (created_at, start_time) narrow to `str`
+# for the response schemas, while nullable ones (end_time) stay optional.
+@overload
+def _iso(dt: datetime) -> str: ...
+@overload
+def _iso(dt: None) -> None: ...
+def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
 
 

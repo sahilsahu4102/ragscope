@@ -51,8 +51,29 @@ class Settings(BaseSettings):
 
     # ── Ollama (Self-Hosted LLM) ──────────────
     ollama_base_url: str = "http://ollama:11434"
-    ollama_model: str = "llama3.1:8b"
+    # llama3.2:3b (~2GB) fits fully in 4GB VRAM. llama3.1:8b needs 5.6GB and gets
+    # split ~58% onto CPU, which is what pushed generation to 27-42s per call.
+    ollama_model: str = "llama3.2:3b"
     ollama_embedding_model: str = "nomic-embed-text"
+    ollama_keep_alive: str = Field(
+        default="-1",
+        description="Ollama keep_alive: seconds as an integer ('-1' = never unload), "
+        "or a duration with a unit ('10m'). The 5m default caused ~3.8s cold-start "
+        "reloads on the query path.",
+    )
+
+    @property
+    def ollama_keep_alive_value(self) -> int | str:
+        """keep_alive coerced to what Ollama's JSON API actually accepts.
+
+        Ollama parses a *string* as a Go duration, so a bare "-1" fails with
+        'missing unit in duration'. Plain integers must be sent as JSON numbers;
+        unit-suffixed values ("10m") stay strings.
+        """
+        try:
+            return int(self.ollama_keep_alive)
+        except ValueError:
+            return self.ollama_keep_alive
 
     # ── Embedding Registry ────────────────────
     default_embedding_provider: str = Field(
@@ -76,6 +97,20 @@ class Settings(BaseSettings):
     rerank_top_k: int = 5
     rrf_k: int = 60
     semantic_cache_threshold: float = 0.85
+
+    # ── Reranking ─────────────────────────────
+    reranker_backend: str = Field(
+        default="cross_encoder",
+        description="'cross_encoder' (fast, local ONNX-able) or 'ollama' (LLM-scored, slow)",
+    )
+    reranker_model: str = Field(
+        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        description=(
+            "Cross-encoder checkpoint. MiniLM-L-6 is 22M params (~30-60ms for 20 pairs "
+            "on CPU). BAAI/bge-reranker-v2-m3 is 568M and ~50x slower — higher quality "
+            "but far outside a real-time latency budget."
+        ),
+    )
 
     # ── Evaluation ───────────────────────────────
     eval_faithfulness_threshold: float = 0.80

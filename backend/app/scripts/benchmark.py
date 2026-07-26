@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import statistics
-import sys
 import time
 
 import httpx
@@ -294,7 +293,7 @@ def format_results(results: dict) -> str:
         lines.append(f"| Cache Miss p50 | {results['cache_miss'].get('p50', '—')} ms |")
     if results.get("cache_hit"):
         lines.append(f"| Cache Hit p50 | {results['cache_hit'].get('p50', '—')} ms |")
-        lines.append(f"| Speedup | {results['cache_hit'].get('speedup', '—')}× |")
+        lines.append(f"| Speedup | {results['cache_hit'].get('speedup', '—')}x |")
 
     lines.extend([
         "",
