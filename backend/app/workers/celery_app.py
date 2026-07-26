@@ -12,6 +12,10 @@ celery_app = Celery(
     "ragscope",
     broker=settings.redis_url,
     backend=settings.redis_url,
+    # Explicit imports — autodiscover_tasks() only looks for a module named
+    # `tasks` inside each package, so it never picked up `ingest_task.py`
+    # and the worker rejected every job as an unregistered task.
+    include=["app.workers.ingest_task"],
 )
 
 celery_app.conf.update(
@@ -25,5 +29,5 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
 )
 
-# Auto-discover tasks from app.workers
+# Also scan app.workers for any conventionally-named `tasks` modules added later.
 celery_app.autodiscover_tasks(["app.workers"])

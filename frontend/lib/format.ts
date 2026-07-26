@@ -23,6 +23,13 @@ export function pct(value: number | null | undefined, digits = 1): string {
   return `${(value * 100).toFixed(digits)}%`;
 }
 
+export function bytes(value: number | null | undefined): string {
+  if (value == null) return "—";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(0)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export function shortId(id: string, len = 8): string {
   return id.length > len ? id.slice(0, len) : id;
 }

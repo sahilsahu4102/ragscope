@@ -126,6 +126,11 @@ class DenseRetriever:
             # Fetch extra candidates for Stage 3 post-filtering
             fetch_limit = top_k * 2 if filters.get("min_score") else top_k
 
+            # NOTE: use CAST(... AS vector), not `:query_vector::vector`.
+            # SQLAlchemy's text() bind regex is `(?<![:\w$]):([\w$]+)(?![:\w$])`
+            # — the leading colon of a `::` cast satisfies that trailing
+            # lookahead, so `:query_vector` is silently NOT bound and Postgres
+            # receives the literal text, failing with `syntax error at or near ":"`.
             sql = text(f"""
                 SELECT
                     c.id,
@@ -136,11 +141,11 @@ class DenseRetriever:
                     c.token_count,
                     d.filename as document_name,
                     d.id as document_id,
-                    1 - (c.embedding <=> :query_vector::vector) as score
+                    1 - (c.embedding <=> CAST(:query_vector AS vector)) as score
                 FROM chunks c
                 JOIN documents d ON c.document_id = d.id
                 WHERE {where_sql}
-                ORDER BY c.embedding <=> :query_vector::vector
+                ORDER BY c.embedding <=> CAST(:query_vector AS vector)
                 LIMIT :top_k
             """)
 
@@ -166,22 +171,27 @@ class DenseRetriever:
                 )
 
             # ── Stage 3: Post-filter (lightweight, on result set) ──
-            if filters.get("min_score"):
-                min_score = float(filters["min_score"])
-                chunks = [c for c in chunks if c["dense_score"] >= min_score]
+            raw_min_score = filters.get("min_score")
+            if raw_min_score is not None:
+                threshold = float(str(raw_min_score))
+                chunks = [c for c in chunks if float(str(c["dense_score"])) >= threshold]
 
-            if filters.get("min_tokens"):
-                min_tokens = int(filters["min_tokens"])
+            raw_min_tokens = filters.get("min_tokens")
+            if raw_min_tokens is not None:
+                floor = int(str(raw_min_tokens))
                 chunks = [
                     c for c in chunks
-                    if c.get("token_count") and c["token_count"] >= min_tokens
+                    if c.get("token_count") is not None
+                    and int(str(c["token_count"])) >= floor
                 ]
 
-            if filters.get("max_tokens"):
-                max_tokens = int(filters["max_tokens"])
+            raw_max_tokens = filters.get("max_tokens")
+            if raw_max_tokens is not None:
+                ceiling = int(str(raw_max_tokens))
                 chunks = [
                     c for c in chunks
-                    if c.get("token_count") and c["token_count"] <= max_tokens
+                    if c.get("token_count") is not None
+                    and int(str(c["token_count"])) <= ceiling
                 ]
 
             # Trim to requested top_k after post-filtering

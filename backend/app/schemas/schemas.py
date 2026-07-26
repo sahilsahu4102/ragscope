@@ -37,6 +37,32 @@ class IngestStatusResponse(BaseModel):
     error: str | None = None
 
 
+# ── Documents ─────────────────────────────────
+
+
+class DocumentResponse(BaseModel):
+    """An ingested document with its current processing state."""
+
+    id: str
+    filename: str
+    mime_type: str
+    status: str = Field(..., description="pending | processing | completed | failed")
+    file_size_bytes: int | None = None
+    page_count: int | None = None
+    chunk_count: int = 0
+    error_message: str | None = None
+    created_at: str
+    updated_at: str | None = None
+
+
+class DocumentDeleteResponse(BaseModel):
+    """Confirmation of a document deletion."""
+
+    id: str
+    chunks_deleted: int
+    message: str
+
+
 # ── Query ─────────────────────────────────────
 
 

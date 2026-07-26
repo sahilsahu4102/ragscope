@@ -4,8 +4,15 @@ import type {
   CacheAnalytics,
   CostAnalytics,
   Dataset,
+  DocumentDeleteResponse,
   Experiment,
+  IngestedDocument,
+  IngestResponse,
   LatencyAnalytics,
+  QueryRequest,
+  QueryResponse,
+  RetrieveRequest,
+  RetrieveResponse,
   ThroughputAnalytics,
   TraceDetail,
   TraceSummary,
@@ -26,12 +33,21 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
+    // FormData must set its own multipart Content-Type (it carries the
+    // boundary), so only force JSON when we're not uploading a file.
+    const isForm =
+      typeof FormData !== "undefined" && init?.body instanceof FormData;
     res = await fetch(`${BASE_URL}${path}`, {
       ...init,
-      headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+      headers: isForm
+        ? { ...(init?.headers ?? {}) }
+        : { "Content-Type": "application/json", ...(init?.headers ?? {}) },
       cache: "no-store",
     });
-  } catch {
+  } catch (e) {
+    // A caller-triggered abort is not a connectivity failure — let it through
+    // so the UI can distinguish "cancelled" from "backend is down".
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
     throw new ApiError(
       "Could not reach the RAGScope API. Is the backend running?",
       0,
@@ -51,6 +67,40 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // ── Documents / ingestion ──
+  listDocuments: (status?: string) =>
+    request<IngestedDocument[]>(
+      `/documents${status ? `?status=${encodeURIComponent(status)}` : ""}`,
+    ),
+  deleteDocument: (id: string) =>
+    request<DocumentDeleteResponse>(`/documents/${id}`, { method: "DELETE" }),
+  /** Upload a file for ingestion. Returns immediately with a Celery job id. */
+  ingestDocument: (file: File, signal?: AbortSignal) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<IngestResponse>("/ingest", {
+      method: "POST",
+      body: form,
+      signal,
+    });
+  },
+
+  // ── RAG pipeline ──
+  /** Full RAG pipeline: retrieve → generate → grounded answer with citations. */
+  query: (payload: QueryRequest, signal?: AbortSignal) =>
+    request<QueryResponse>("/query", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    }),
+  /** Retrieval only — returns chunks with per-stage scores, no generation. */
+  retrieve: (payload: RetrieveRequest, signal?: AbortSignal) =>
+    request<RetrieveResponse>("/retrieve", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    }),
+
   // ── Traces ──
   listTraces: (params?: {
     limit?: number;
