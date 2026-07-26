@@ -4,11 +4,25 @@ import {
   BarChart3,
   FlaskConical,
   GitBranch,
+  MessageSquare,
+  Microscope,
   Waypoints,
 } from "lucide-react";
 import { Card, PageHeader } from "@/components/ui";
 
 const FEATURES = [
+  {
+    href: "/playground",
+    icon: MessageSquare,
+    title: "Playground",
+    body: "Ask questions against your ingested documents. Grounded answers with clickable citations, live latency and token counts, and thumbs up/down feedback.",
+  },
+  {
+    href: "/inspector",
+    icon: Microscope,
+    title: "Retrieval Inspector",
+    body: "Retrieval without generation — every chunk with its dense, BM25, RRF and rerank score, plus the staged metadata filters applied.",
+  },
   {
     href: "/traces",
     icon: Waypoints,
@@ -55,7 +69,7 @@ export default function OverviewPage() {
         </p>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
         {FEATURES.map(({ href, icon: Icon, title, body }) => (
           <Link key={href} href={href}>
             <Card className="group h-full transition-colors hover:border-primary/50">
@@ -97,9 +111,10 @@ export default function OverviewPage() {
         <Card>
           <h3 className="font-semibold text-on-surface">API surface</h3>
           <p className="mt-1 text-xs text-on-surface-muted">
-            New in Phase 4, mounted under <code>/api/v1</code>.
+            Endpoints this dashboard drives, mounted under <code>/api/v1</code>.
           </p>
           <ul className="mt-4 space-y-1 font-mono text-xs text-on-surface-muted">
+            <li>POST /query · /retrieve</li>
             <li>GET /traces · /traces/{"{id}"}</li>
             <li>POST/GET /experiments</li>
             <li>POST/GET /feedback</li>

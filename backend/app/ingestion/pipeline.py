@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 
 import structlog
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -60,16 +61,25 @@ class IngestionPipeline:
                 "document.id": str(doc_id),
             },
         ):
-            # ── 1. Create Document record ─────────────
-            document = Document(
-                id=doc_id,
-                filename=path.name,
-                mime_type=self._detect_mime(path),
-                status="processing",
-                file_size_bytes=path.stat().st_size,
-            )
-            self.db.add(document)
-            await self.db.flush()
+            # ── 1. Adopt or create the Document record ─
+            # The ingest API pre-creates a row (status="pending") before it
+            # dispatches the Celery job, so inserting the same id here would
+            # violate the primary key. Adopt the existing row when there is one;
+            # only insert when the pipeline is driven directly (tests, scripts).
+            document = await self.db.get(Document, doc_id)
+            if document is None:
+                document = Document(
+                    id=doc_id,
+                    filename=path.name,
+                    mime_type=self._detect_mime(path),
+                    file_size_bytes=path.stat().st_size,
+                )
+                self.db.add(document)
+            document.status = "processing"
+            # Commit, not flush — an uncommitted status is invisible to the API
+            # session, so a polling client would sit on "pending" for the whole
+            # run and then jump straight to "completed".
+            await self.db.commit()
 
             try:
                 # ── 2. Parse ──────────────────────────
@@ -157,10 +167,21 @@ class IngestionPipeline:
                 return document
 
             except Exception as e:
-                document.status = "failed"
-                document.error_message = str(e)
-                await self.db.commit()
                 logger.error("Ingestion failed", document_id=str(doc_id), error=str(e))
+                # A DB-level failure leaves the session unusable, so roll back
+                # before recording the status or the write fails too and the
+                # document is stranded at "pending" forever. The UPDATE goes
+                # through Core rather than the (now expired) ORM instance.
+                await self.db.rollback()
+                try:
+                    await self.db.execute(
+                        update(Document)
+                        .where(Document.id == doc_id)
+                        .values(status="failed", error_message=str(e)[:2000])
+                    )
+                    await self.db.commit()
+                except Exception:  # pragma: no cover — best-effort status write
+                    logger.warning("Could not record failure status", document_id=str(doc_id))
                 raise
 
     @staticmethod

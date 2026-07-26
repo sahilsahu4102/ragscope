@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   Activity,
   BarChart3,
+  FileStack,
   FlaskConical,
   LayoutDashboard,
   MessageSquare,
@@ -15,14 +16,12 @@ import {
 
 const NAV = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
+  { href: "/documents", label: "Documents", icon: FileStack },
+  { href: "/playground", label: "Playground", icon: MessageSquare },
+  { href: "/inspector", label: "Retrieval Inspector", icon: Microscope },
   { href: "/traces", label: "Trace Viewer", icon: Waypoints, badge: "P4" },
   { href: "/experiments", label: "Experiments", icon: FlaskConical, badge: "P4" },
   { href: "/analytics", label: "Analytics", icon: BarChart3, badge: "P4" },
-];
-
-const EXTERNAL = [
-  { href: "/chat.html", label: "Playground", icon: MessageSquare },
-  { href: "/inspector.html", label: "Retrieval Inspector", icon: Microscope },
 ];
 
 export function Sidebar() {
@@ -66,20 +65,6 @@ export function Sidebar() {
             </Link>
           );
         })}
-
-        <div className="px-3 pb-1 pt-5 text-[10px] uppercase tracking-widest text-on-surface-muted">
-          Design mockups
-        </div>
-        {EXTERNAL.map(({ href, label, icon: Icon }) => (
-          <a
-            key={href}
-            href={href}
-            className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-on-surface-muted transition-colors hover:bg-surface-container-high hover:text-on-surface"
-          >
-            <Icon className="h-4 w-4" />
-            <span>{label}</span>
-          </a>
-        ))}
       </nav>
 
       <div className="border-t border-border px-5 py-4 text-[11px] text-on-surface-muted">

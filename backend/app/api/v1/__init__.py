@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from app.api.v1.analytics import router as analytics_router
 from app.api.v1.datasets import router as datasets_router
+from app.api.v1.documents import router as documents_router
 from app.api.v1.evaluate import router as evaluate_router
 from app.api.v1.experiments import router as experiments_router
 from app.api.v1.feedback import router as feedback_router
@@ -20,6 +21,7 @@ router = APIRouter(tags=["v1"])
 
 # Mount endpoint routers
 router.include_router(ingest_router)
+router.include_router(documents_router)
 router.include_router(query_router)
 router.include_router(retrieve_router)
 router.include_router(datasets_router)
@@ -38,6 +40,7 @@ async def api_root():
         "version": "v1",
         "endpoints": {
             "ingest": "/api/v1/ingest",
+            "documents": "/api/v1/documents",
             "query": "/api/v1/query",
             "retrieve": "/api/v1/retrieve",
             "datasets": "/api/v1/datasets",
