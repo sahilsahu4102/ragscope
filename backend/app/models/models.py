@@ -3,6 +3,10 @@ RAGScope — SQLAlchemy Models
 
 Core data models: Document, Chunk, Query, Feedback.
 All tables use UUID primary keys for distributed-safe IDs.
+
+Declared with SQLAlchemy 2.0 `Mapped[...]` / `mapped_column(...)`. The schema
+is identical to the legacy `Column()` form; the annotations just let type
+checkers see `query.latency_ms` as `float | None` rather than `Column[float]`.
 """
 
 import uuid
@@ -10,7 +14,6 @@ from datetime import UTC, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
-    Column,
     DateTime,
     Float,
     ForeignKey,
@@ -20,7 +23,7 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 
@@ -34,25 +37,35 @@ class Document(Base):
 
     __tablename__ = "documents"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    filename = Column(String(500), nullable=False)
-    source_url = Column(String(2000), nullable=True)
-    mime_type = Column(String(100), nullable=False)
-    status = Column(
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    filename: Mapped[str] = mapped_column(String(500), nullable=False)
+    source_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
         default="pending",
         comment="pending | processing | completed | failed",
     )
-    file_size_bytes = Column(Integer, nullable=True)
-    page_count = Column(Integer, nullable=True)
-    metadata_ = Column("metadata", JSONB, nullable=True, default=dict)
-    error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metadata_: Mapped[dict | None] = mapped_column(
+        "metadata", JSONB, nullable=True, default=dict
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
 
     # Relationships
-    chunks = relationship("Chunk", back_populates="document", cascade="all, delete-orphan")
+    chunks: Mapped[list["Chunk"]] = relationship(
+        "Chunk", back_populates="document", cascade="all, delete-orphan"
+    )
 
 
 class Chunk(Base):
@@ -60,36 +73,45 @@ class Chunk(Base):
 
     __tablename__ = "chunks"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id = Column(
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
-    parent_id = Column(
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("chunks.id", ondelete="SET NULL"),
         nullable=True,
         comment="Parent chunk ID for hierarchical chunking",
     )
-    content = Column(Text, nullable=False)
-    contextual_summary = Column(
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    contextual_summary: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
         comment="LLM-generated context prepended before embedding (Anthropic pattern)",
     )
-    chunk_index = Column(Integer, nullable=False)
-    token_count = Column(Integer, nullable=True)
-    embedding = Column(Vector(768), nullable=True)
-    embedding_model = Column(String(100), nullable=True)
-    element_type = Column(
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    element_type: Mapped[str | None] = mapped_column(
         String(50),
         nullable=True,
         comment="title | paragraph | table | list | image_caption",
     )
-    metadata_ = Column("metadata", JSONB, nullable=True, default=dict)
-    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    metadata_: Mapped[dict | None] = mapped_column(
+        "metadata", JSONB, nullable=True, default=dict
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
 
     # Relationships
-    document = relationship("Document", back_populates="chunks")
+    document: Mapped["Document"] = relationship("Document", back_populates="chunks")
+    # Self-referential many-to-one; `backref` also creates the reverse `parent`
+    # collection at runtime. Left unannotated because the backref attribute is
+    # generated dynamically and has no static counterpart.
     children = relationship("Chunk", backref="parent", remote_side=[id])
 
     __table_args__ = (
@@ -105,24 +127,34 @@ class Query(Base):
 
     __tablename__ = "queries"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    text = Column(Text, nullable=False)
-    answer = Column(Text, nullable=True)
-    citations = Column(JSONB, nullable=True, comment="Structured citation objects")
-    trace_id = Column(String(64), nullable=True, index=True)
-    retrieval_scores = Column(
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    citations: Mapped[list | None] = mapped_column(
+        JSONB, nullable=True, comment="Structured citation objects"
+    )
+    trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    retrieval_scores: Mapped[list | None] = mapped_column(
         JSONB,
         nullable=True,
         comment="Per-chunk scores: dense, sparse, rrf, rerank",
     )
-    latency_ms = Column(Float, nullable=True)
-    total_tokens = Column(Integer, nullable=True)
-    total_cost_usd = Column(Float, nullable=True)
-    config_snapshot = Column(JSONB, nullable=True, comment="Retrieval/gen config used")
-    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    config_snapshot: Mapped[dict | None] = mapped_column(
+        JSONB, nullable=True, comment="Retrieval/gen config used"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
 
     # Relationships
-    feedback = relationship("Feedback", back_populates="query", cascade="all, delete-orphan")
+    feedback: Mapped[list["Feedback"]] = relationship(
+        "Feedback", back_populates="query", cascade="all, delete-orphan"
+    )
 
 
 class Feedback(Base):
@@ -130,13 +162,21 @@ class Feedback(Base):
 
     __tablename__ = "feedback"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    query_id = Column(
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    query_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("queries.id", ondelete="CASCADE"), nullable=False
     )
-    rating = Column(Integer, nullable=False, comment="-1 (down) or 1 (up)")
-    correction = Column(Text, nullable=True, comment="User-provided correct answer")
-    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    rating: Mapped[int] = mapped_column(
+        Integer, nullable=False, comment="-1 (down) or 1 (up)"
+    )
+    correction: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="User-provided correct answer"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
 
     # Relationships
-    query = relationship("Query", back_populates="feedback")
+    query: Mapped["Query"] = relationship("Query", back_populates="feedback")

@@ -103,6 +103,41 @@ class GuardrailsPipeline:
             "injection_result": injection_result,
         }
 
+    def redact_output(self, answer: str) -> dict:
+        """Fast, synchronous half of the output guardrails.
+
+        PII redaction is regex-only and mutates the answer, so it must run
+        before the response is sent. Split out from check_output() so the
+        LLM-based groundedness check can run after the response is flushed
+        (it measured ~8.9s on the critical path).
+
+        Returns:
+            {"redacted_answer": str, "pii_findings": list}
+        """
+        if not self.pii_redactor:
+            return {"redacted_answer": answer, "pii_findings": []}
+
+        redacted_answer, pii_findings = self.pii_redactor.redact(answer)
+        return {"redacted_answer": redacted_answer, "pii_findings": pii_findings}
+
+    async def score_groundedness(
+        self,
+        answer: str,
+        context_chunks: list[dict] | None = None,
+    ) -> dict | None:
+        """Slow, LLM-based half of the output guardrails.
+
+        Safe to run off the critical path — it observes the answer rather than
+        modifying it. Returns None when disabled or when there is no context.
+        """
+        if not self.hallucination_detector or not context_chunks:
+            return None
+
+        return await self.hallucination_detector.detect(
+            answer=answer,
+            context_chunks=context_chunks,
+        )
+
     async def check_output(
         self,
         answer: str,

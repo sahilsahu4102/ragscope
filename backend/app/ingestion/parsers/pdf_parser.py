@@ -70,7 +70,10 @@ class PDFParser(BaseParser):
         # Second pass: extract elements with classification
         current_section: str | None = None
 
-        for page_num, page in enumerate(doc, 1):
+        # doc.pages() is PyMuPDF's documented page generator. Iterating `doc`
+        # directly only works via the legacy __getitem__ sequence protocol —
+        # fitz.Document defines no __iter__.
+        for page_num, page in enumerate(doc.pages(), 1):
             blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
 
             for block in blocks:
@@ -144,7 +147,10 @@ class PDFParser(BaseParser):
         doc = fitz.open(str(path))
         elements: list[ParsedElement] = []
 
-        for page_num, page in enumerate(doc, 1):
+        # doc.pages() is PyMuPDF's documented page generator. Iterating `doc`
+        # directly only works via the legacy __getitem__ sequence protocol —
+        # fitz.Document defines no __iter__.
+        for page_num, page in enumerate(doc.pages(), 1):
             text = page.get_text("text").strip()
             if text:
                 elements.append(

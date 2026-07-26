@@ -48,7 +48,7 @@ class OllamaEmbedder(BaseEmbedder):
 
     Phase 5: Uses Ollama's batch /api/embed endpoint (accepts array input)
     to embed all texts in a single HTTP call per batch, eliminating the
-    N×round-trip overhead of the Phase 1 implementation.
+    Nxround-trip overhead of the Phase 1 implementation.
     """
 
     # Max texts per API call — prevents OOM on large ingestion batches
@@ -88,7 +88,13 @@ class OllamaEmbedder(BaseEmbedder):
             try:
                 response = await client.post(
                     f"{self._base_url}/api/embed",
-                    json={"model": self._model, "input": batch},
+                    json={
+                        "model": self._model,
+                        "input": batch,
+                        # Pin the embedder in memory — the 5m default caused
+                        # ~3.8s cold reloads on the query path.
+                        "keep_alive": settings.ollama_keep_alive_value,
+                    },
                 )
                 response.raise_for_status()
                 data = response.json()

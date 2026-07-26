@@ -43,6 +43,12 @@ services:
     restart: unless-stopped
     ports:
       - "11434:11434"
+    environment:
+      # Keep models resident. The 5m default unloaded between queries and cost
+      # ~3.8s reloading a 5.6GB model back off disk.
+      OLLAMA_KEEP_ALIVE: "-1"
+      # Allow the embedder and generator to be loaded at the same time.
+      OLLAMA_MAX_LOADED_MODELS: "2"
     volumes:
       - ollama_data:/root/.ollama
     deploy:
@@ -72,6 +78,9 @@ services:
     volumes:
       - ./backend:/app
       - upload_data:/app/uploads
+      # Persist the cross-encoder checkpoint across container recreates —
+      # otherwise it re-downloads from HuggingFace on every `up`.
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,7 +88,10 @@ services:
         condition: service_healthy
       ollama:
         condition: service_started
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --workers 2
+    # NOTE: --reload and --workers are mutually exclusive; uvicorn ignores
+    # --workers when reloading. Each worker would also hold its own copy of the
+    # cross-encoder and BM25 index, so raise this deliberately, not by default.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   # ── Celery Worker ────────────────────────────
   celery-worker:
@@ -124,3 +136,4 @@ volumes:
   redis_data:
   ollama_data:
   upload_data:
+  hf_cache:

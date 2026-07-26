@@ -98,6 +98,7 @@ class Generator:
                     "model": self.model,
                     "prompt": prompt,
                     "stream": False,
+                    "keep_alive": settings.ollama_keep_alive_value,
                     "options": {
                         "temperature": 0.3,
                         "top_p": 0.9,
@@ -160,19 +161,22 @@ class Generator:
         context = format_context(chunks)
         prompt = GROUNDED_QA_PROMPT.format(context=context, question=question)
 
-        import httpx as _httpx
+        from app.http_client import get_http_client
 
-        # Streaming requires its own client context since the response body
-        # is consumed lazily; the shared pool is still used for non-stream.
+        # Stream from the shared pool. Only the response context is scoped to
+        # this request — the client itself stays alive, so we reuse the existing
+        # keep-alive connection instead of doing a fresh TCP handshake per query.
+        client = get_http_client()
+
         async with (
-            _httpx.AsyncClient(timeout=120.0) as stream_client,
-            stream_client.stream(
+            client.stream(
                 "POST",
                 f"{self.base_url}/api/generate",
                 json={
                     "model": self.model,
                     "prompt": prompt,
                     "stream": True,
+                    "keep_alive": settings.ollama_keep_alive_value,
                     "options": {
                         "temperature": 0.3,
                         "top_p": 0.9,
