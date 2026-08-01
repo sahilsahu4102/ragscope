@@ -52,6 +52,7 @@ class RetrievalPipeline:
         query_transform: str = "none",
         rrf_k: int = 60,
         filters: dict | None = None,
+        reranker_backend: str | None = None,
     ) -> list[dict]:
         """
         Run the full retrieval pipeline.
@@ -64,6 +65,9 @@ class RetrievalPipeline:
             query_transform: "none", "rewrite", "hyde", or "decompose"
             rrf_k: RRF constant (default 60)
             filters: Optional metadata pre-filters dict
+            reranker_backend: "cross_encoder" | "ollama". None uses the
+                configured default. Exposed so A/B experiments can vary the
+                reranker without changing global settings.
 
         Returns:
             Ranked list of chunk dicts with scores from each stage.
@@ -141,10 +145,16 @@ class RetrievalPipeline:
 
             # ── 5. Reranking ─────────────────────────
             if use_reranker and candidates:
-                # Backend comes from settings.reranker_backend (default:
-                # cross_encoder). Was hardcoded to the Ollama LLM reranker,
-                # which measured 62-67s per query.
-                reranker = get_reranker()
+                # Backend defaults to settings.reranker_backend (cross_encoder).
+                # Was hardcoded to the Ollama LLM reranker, which measured
+                # 62-67s per query. A per-request override lets experiments
+                # compare backends on identical inputs.
+                use_cross_encoder = (
+                    None
+                    if reranker_backend is None
+                    else reranker_backend.lower() == "cross_encoder"
+                )
+                reranker = get_reranker(use_cross_encoder=use_cross_encoder)
                 candidates = await reranker.rerank(
                     query=effective_query,
                     chunks=candidates,

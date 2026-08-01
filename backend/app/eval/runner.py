@@ -73,6 +73,9 @@ class EvalRunner:
             "use_reranker": config.get("use_reranker", True),
             "use_hybrid": config.get("use_hybrid", True),
             "query_transform": config.get("query_transform", "none"),
+            # None => whatever settings.reranker_backend says. Recorded in the
+            # snapshot so a run is reproducible from its own config.
+            "reranker_backend": config.get("reranker_backend", settings.reranker_backend),
             "use_llm_judge": self.use_llm_judge,
         }
 
@@ -195,6 +198,7 @@ class EvalRunner:
                 use_reranker=config.get("use_reranker", True),
                 query_transform=config.get("query_transform", "none"),
                 rrf_k=config.get("rrf_k", settings.rrf_k),
+                reranker_backend=config.get("reranker_backend"),
             )
             retrieval_latency = round((time.time() - retrieval_start) * 1000, 2)
 

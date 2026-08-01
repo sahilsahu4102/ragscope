@@ -60,20 +60,27 @@ jobs:
           cd backend
           pytest tests/test_eval.py -v --tb=short
 
-      # Phase 3+ — Full eval run against golden dataset
-      # Uncomment when golden dataset is committed to eval-datasets/
-      # - name: Run full eval regression
-      #   env:
-      #     POSTGRES_HOST: localhost
-      #     POSTGRES_USER: ragscope
-      #     POSTGRES_PASSWORD: test
-      #     POSTGRES_DB: ragscope_test
-      #     REDIS_URL: redis://localhost:6379/0
-      #     OLLAMA_BASE_URL: http://localhost:11434
-      #   run: |
-      #     cd backend
-      #     python -m app.eval.ci_gate \
-      #       --dataset eval-datasets/golden-v1.jsonl \
-      #       --faithfulness-threshold 0.80 \
-      #       --context-recall-threshold 0.70 \
-      #       --ndcg-threshold 0.60
+      # Full eval regression against the committed golden dataset.
+      #
+      # Requires a reachable model server. On a GitHub-hosted runner there is
+      # no Ollama, so this is gated on RUN_FULL_EVAL being set — enable it on a
+      # self-hosted runner (or once a hosted inference endpoint is configured).
+      # Thresholds are deliberately below the current measured baseline so the
+      # gate catches regressions rather than failing on noise.
+      - name: Run full eval regression
+        if: ${{ vars.RUN_FULL_EVAL == 'true' }}
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_USER: ragscope
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: ragscope_test
+          REDIS_URL: redis://localhost:6379/0
+          OLLAMA_BASE_URL: ${{ vars.OLLAMA_BASE_URL || 'http://localhost:11434' }}
+          UPLOAD_DIR: /tmp/ragscope_uploads
+        run: |
+          cd backend
+          python -m app.eval.ci_gate \
+            --dataset ../eval-datasets/golden-v1.jsonl \
+            --faithfulness-threshold 0.80 \
+            --context-recall-threshold 0.70 \
+            --ndcg-threshold 0.60
