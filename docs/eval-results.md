@@ -161,8 +161,9 @@ Per-stage spans, warm, hybrid + rerank:
 | retrieval total | 581 ms | 508 ms |
 
 The vector scan got ~4x faster while the corpus grew 2.8x. BM25 moved the
-other way — it is an in-memory O(N) scorer, so it grows with the corpus and
-will need replacing with Postgres FTS well before 100k chunks.
+other way, since it scores the whole corpus per query. Postgres FTS looked
+like the obvious replacement; measuring it showed otherwise — see the next
+section.
 
 ## Sparse retrieval: BM25 vs Postgres FTS
 
