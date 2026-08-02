@@ -105,6 +105,65 @@ answers and p50 is ~8s.
 The Phase 6 before/after deltas are unaffected — both sides used the same
 question set — but ~8s p50 is the honest absolute number for real queries.
 
+## Vector index scaling
+
+The corpus is 5,869 chunks — too small to tell you whether retrieval survives
+growth. `app/scripts/hnsw_scale.py` measures the scaling curve by seeding a
+scratch table with the real embeddings and expanding it with perturbed copies
+(perturbed rather than random, because uniformly random vectors sit off the
+manifold real embeddings occupy and ANN recall depends on that geometry).
+
+Recall is measured against exact search on the same table:
+`|ANN top-k INTERSECT exact top-k| / k`.
+
+| Corpus | Exact (seq scan) | HNSW ef=40 | recall@10 | Speedup | Build |
+|---|---|---|---|---|---|
+| 5,869 | 16.0 ms | 2.9 ms | 1.000 | 5.4x | 2.9s |
+| 25,000 | 55.7 ms | 3.4 ms | 1.000 | 16.5x | 40.3s |
+| 100,000 | 373.5 ms | 4.6 ms | 0.995 | 81.9x | 350.2s |
+
+Exact search scales linearly (16 -> 56 -> 374 ms). HNSW scales logarithmically
+— 1.6x the latency for 17x the data — at effectively unchanged recall. Index
+build cost grows superlinearly and is the real price: ~6 minutes at 100k.
+
+This measures **index behaviour only**. Synthetic rows carry no meaningful
+text, so retrieval *quality* numbers stay on the real corpus above.
+
+### The index alone was not enough
+
+Creating the HNSW index did not speed anything up, because Postgres kept
+choosing a sequential scan over it:
+
+```
+Seq Scan on chunks c  (cost=0.00..456.36)  actual time=0.031..13.061
+```
+
+`random_page_cost` defaults to 4.0, which models the seek cost of a spinning
+disk. On NVMe that overprices index scans badly. Measured on the live table:
+
+| random_page_cost | Plan | Execution |
+|---|---|---|
+| 4.0 (default) | Seq Scan | 13.5 ms |
+| 1.1 | Index Scan | **1.35 ms** |
+
+Set in docker-compose.yml. Worth knowing that an ANN index can be present,
+correct, and completely unused — `EXPLAIN ANALYZE` is the only way to tell.
+
+### Effect on the live pipeline
+
+Per-stage spans, warm, hybrid + rerank:
+
+| Stage | Before (2,094 chunks, no index) | After (5,869 chunks, HNSW) |
+|---|---|---|
+| vector scan | ~15.5 ms | 3.7 ms |
+| BM25 | 9.2 ms | 20.4 ms |
+| rerank | 507 ms | 472 ms |
+| retrieval total | 581 ms | 508 ms |
+
+The vector scan got ~4x faster while the corpus grew 2.8x. BM25 moved the
+other way — it is an in-memory O(N) scorer, so it grows with the corpus and
+will need replacing with Postgres FTS well before 100k chunks.
+
 ## Limitations
 
 - Latency n=5 per mode. The p95/p99 columns the benchmark prints are

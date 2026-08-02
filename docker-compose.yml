@@ -14,6 +14,14 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # random_page_cost defaults to 4.0, which models a spinning disk's seek
+    # cost. On NVMe the planner therefore overprices index scans and picks a
+    # sequential scan over the HNSW index. Measured on the live chunks table:
+    #   4.0 -> Seq Scan,   13.5 ms
+    #   1.1 -> Index Scan,  1.35 ms
+    command: >
+      postgres
+      -c random_page_cost=1.1
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ragscope}"]
       interval: 10s

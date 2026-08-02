@@ -37,9 +37,7 @@ class Document(Base):
 
     __tablename__ = "documents"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
     source_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -51,9 +49,7 @@ class Document(Base):
     )
     file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    metadata_: Mapped[dict | None] = mapped_column(
-        "metadata", JSONB, nullable=True, default=dict
-    )
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True, default=dict)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
@@ -73,9 +69,7 @@ class Chunk(Base):
 
     __tablename__ = "chunks"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     document_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
@@ -100,9 +94,7 @@ class Chunk(Base):
         nullable=True,
         comment="title | paragraph | table | list | image_caption",
     )
-    metadata_: Mapped[dict | None] = mapped_column(
-        "metadata", JSONB, nullable=True, default=dict
-    )
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
@@ -119,6 +111,21 @@ class Chunk(Base):
         Index("ix_chunks_parent_id", "parent_id"),
         Index("ix_chunks_element_type", "element_type"),
         Index("ix_chunks_created_at", "created_at"),
+        # ANN index for cosine similarity search. Without it every query is a
+        # sequential scan over the whole table: measured 13ms at 5.9k chunks
+        # but ~230ms at 100k, where HNSW stays in single-digit ms at recall
+        # 1.000 (see docs/eval-results.md).
+        #
+        # m=16 / ef_construction=64 are pgvector's defaults and were what the
+        # scaling benchmark measured. Search-time accuracy is tuned separately
+        # via hnsw.ef_search in DenseRetriever.
+        Index(
+            "ix_chunks_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
     )
 
 
@@ -127,9 +134,7 @@ class Query(Base):
 
     __tablename__ = "queries"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     citations: Mapped[list | None] = mapped_column(
@@ -162,15 +167,11 @@ class Feedback(Base):
 
     __tablename__ = "feedback"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     query_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("queries.id", ondelete="CASCADE"), nullable=False
     )
-    rating: Mapped[int] = mapped_column(
-        Integer, nullable=False, comment="-1 (down) or 1 (up)"
-    )
+    rating: Mapped[int] = mapped_column(Integer, nullable=False, comment="-1 (down) or 1 (up)")
     correction: Mapped[str | None] = mapped_column(
         Text, nullable=True, comment="User-provided correct answer"
     )
