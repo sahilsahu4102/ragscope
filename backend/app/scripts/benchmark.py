@@ -23,27 +23,31 @@ import time
 import httpx
 
 # ── Benchmark Questions ──────────────────────────
+# Sourced from eval-datasets/golden-v2.jsonl so the benchmark queries are
+# actually answerable from the ingested corpus. The original list asked about
+# RAG concepts (BM25, RRF, semantic caching) that appear nowhere in the
+# indexed documents, so every measurement ran on near-miss retrievals.
 DEFAULT_QUESTIONS = [
-    "What is retrieval-augmented generation?",
-    "How does BM25 scoring work?",
-    "Explain the difference between dense and sparse retrieval.",
-    "What is reciprocal rank fusion?",
-    "How do cross-encoder rerankers improve search quality?",
-    "What are the benefits of semantic caching?",
-    "Explain the concept of embedding models.",
-    "What is the role of chunking in RAG pipelines?",
-    "How does OpenTelemetry tracing work?",
-    "What metrics are used to evaluate RAG systems?",
-    "Explain faithfulness in RAG evaluation.",
-    "What is context precision?",
-    "How do you detect hallucinations in LLM outputs?",
-    "What is the purpose of a golden evaluation dataset?",
-    "Explain the architecture of a self-hosted RAG system.",
-    "What are the tradeoffs between reranking and no reranking?",
-    "How does HyDE (Hypothetical Document Embeddings) work?",
-    "What is prompt injection and how is it prevented?",
-    "Explain PII detection and redaction techniques.",
-    "What are the key observability metrics for RAG pipelines?",
+    "What is the range of per-GPU model state size saved during Llama 3 checkpointing?",
+    "In the Transformer's position-wise feed-forward network, how do the linear transformations vary across positions compared to across layers?",
+    "Why does the synchronous nature of Llama 3's 16K-GPU training make it less fault-tolerant?",
+    "Why are scaling law experiments necessary for training models on large GPUs?",
+    "What is the main challenge in learning long-range dependencies in sequence transduction tasks?",
+    "How are the image adapters pre-trained?",
+    "Why did the authors choose to use sinusoidal positional embeddings instead of learned positional embeddings?",
+    "How does the iterative process of using feedback from incorrect attempts and correcting them help improve Llama 3's ability to reason accurately?",
+    "How does the Llama 3 model handle code-switched speech?",
+    "What is multitask prompted training, and how does it enable zero-shot task generalization?",
+    "How many parameters does the image encoder have with the additional layers?",
+    "Why did the authors choose not to freeze the language RM part during training?",
+    "How does the fundamental constraint of sequential computation impact the efficiency of computational models?",
+    "What is the primary benefit of using Llama 405B with Llama Guard compared to competing systems?",
+    "How does the reward model contribute to the safety of the Llama 3 model?",
+    "What is the purpose of using an attention mask in sequence processing?",
+    "How do prompt-based system guards work to improve LLM safety and control user requests?",
+    "What percentage of prompt injection attacks against Llama 3 405B were successful?",
+    "Why do pre-trained models perform better on paraphrase detection than post-trained models?",
+    "Why did the Llama 3 authors modify their pipeline parallelism schedule to allow setting N flexibly?",
 ]
 
 
@@ -116,6 +120,7 @@ async def run_benchmark(
     base_url: str = "http://localhost:8000",
     num_queries: int = 20,
     warmup: int = 3,
+    skip_throughput: bool = False,
 ) -> dict:
     """Run the full benchmark suite."""
     questions = DEFAULT_QUESTIONS[:num_queries]
@@ -236,23 +241,29 @@ async def run_benchmark(
         )
 
         # ── 5. Throughput (concurrent queries) ───
-        print("\n📊 Benchmark 5: Throughput (concurrent)...")
-        throughput_start = time.perf_counter()
-        concurrent_results = await asyncio.gather(
-            *[
-                _query(client, base_url, q, use_cache=False)
-                for q in questions[:10]
-            ]
-        )
-        throughput_elapsed = time.perf_counter() - throughput_start
-        successful = sum(1 for r in concurrent_results if r["success"])
-        qps = round(successful / max(throughput_elapsed, 0.01), 2)
-        results["throughput"] = {
-            "concurrent_queries": 10,
-            "successful": successful,
-            "total_time_s": round(throughput_elapsed, 2),
-            "qps": qps,
-        }
+        # 10 simultaneous generations against a single 4GB-VRAM GPU is the
+        # heaviest thing this suite does. Skippable so latency percentiles can
+        # be collected without it.
+        if skip_throughput:
+            print("\n⏭  Benchmark 5: Throughput — skipped (--skip-throughput)")
+        else:
+            print("\n📊 Benchmark 5: Throughput (concurrent)...")
+            throughput_start = time.perf_counter()
+            concurrent_results = await asyncio.gather(
+                *[
+                    _query(client, base_url, q, use_cache=False)
+                    for q in questions[:10]
+                ]
+            )
+            throughput_elapsed = time.perf_counter() - throughput_start
+            successful = sum(1 for r in concurrent_results if r["success"])
+            qps = round(successful / max(throughput_elapsed, 0.01), 2)
+            results["throughput"] = {
+                "concurrent_queries": 10,
+                "successful": successful,
+                "total_time_s": round(throughput_elapsed, 2),
+                "qps": qps,
+            }
 
     return results
 
@@ -319,6 +330,11 @@ async def main():
     parser.add_argument("--warmup", type=int, default=3, help="Warmup queries")
     parser.add_argument("--base-url", type=str, default="http://localhost:8000", help="API base URL")
     parser.add_argument("--output", type=str, default=None, help="Output file path for results")
+    parser.add_argument(
+        "--skip-throughput",
+        action="store_true",
+        help="Skip the 10-way concurrent phase (heaviest load on a single GPU)",
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -332,6 +348,7 @@ async def main():
         base_url=args.base_url,
         num_queries=args.queries,
         warmup=args.warmup,
+        skip_throughput=args.skip_throughput,
     )
 
     report = format_results(results)
