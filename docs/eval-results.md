@@ -251,6 +251,26 @@ GGUF vectors already in the index). Against an ~8s end-to-end query dominated
 by generation, saving ~50ms is under 1%, so it was not worth the migration
 risk. Recorded rather than done.
 
+## Regression check after the Phase 7 changes
+
+HNSW indexing, the `random_page_cost` change, running sparse retrieval on its
+own session, and the semantic-cache rewrite all touch the retrieval path. Re-run
+on golden-v2, same config (hybrid + cross-encoder + bm25):
+
+| metric | before Phase 7 | after | delta |
+|---|---|---|---|
+| ndcg@10 | 0.9022 | 0.9022 | 0.0000 |
+| mrr | 0.8929 | 0.8929 | 0.0000 |
+| recall@10 | 0.7679 | 0.7679 | 0.0000 |
+| hit_rate | 0.9286 | 0.9286 | 0.0000 |
+| context_precision | 0.0464 | 0.0464 | 0.0000 |
+| context_recall | 0.8393 | 0.8393 | 0.0000 |
+| answer_correctness | 0.2480 | 0.2472 | -0.0008 |
+
+Retrieval is bit-identical, which is what recall@10 = 1.000 at this corpus size
+predicts: HNSW returns exactly what exact search returns. The only movement is
+answer_correctness, from generation nondeterminism.
+
 ## Limitations
 
 - Latency n=5 per mode. The p95/p99 columns the benchmark prints are

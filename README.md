@@ -69,25 +69,53 @@ graph TB
 | **Backend** | FastAPI (Python 3.11) | Async-native, auto OpenAPI docs |
 | **Frontend** | Next.js 15 (App Router) | SSR, React Server Components |
 | **Database** | PostgreSQL 16 + pgvector | Relational + vector in one DB |
-| **LLM** | Ollama (Llama 3.1 / Qwen3) | Fully self-hosted |
+| **LLM** | Ollama (Llama 3.2 3B) | Self-hosted; 3B fits a 4GB GPU fully, 8B did not |
+| **Reranker** | ms-marco-MiniLM-L-6-v2 (22M) | Cross-encoder; 123x faster and better than LLM scoring |
 | **Embeddings** | Dual: Ollama + Gemini API | Swappable registry, benchmark both |
+| **Vector index** | pgvector HNSW (m=16, ef=64) | 82x over exact scan at 100k, recall@10 0.995 |
 | **Cache/Queue** | Redis 7 + Celery | Semantic cache + async ingestion |
 | **Tracing** | OpenTelemetry + OpenInference | Industry-standard distributed tracing |
-| **CI/CD** | GitHub Actions | Lint, test, eval regression gates |
+| **CI/CD** | GitHub Actions | Lint, format, tests; eval gate gated on a runner with model access |
 | **Deploy** | Docker Compose (dev) → GCP Cloud Run (prod) | Local-first, cloud-ready |
 
-## Phase 5 — Latency Optimizations
+## Latency work
 
-Key changes that reduce end-to-end query latency:
+Phase 5 optimised within the existing design. Phase 6 instrumented it first,
+which changed what looked worth optimising.
 
-| Optimization | Before | After | Savings |
-|---|---|---|---|
-| **Batched embedding** | N HTTP calls (1 per text) | 1 call (batch /api/embed) | ~60% |
-| **Batched reranking** | N LLM calls (1 per chunk) | 1 LLM call (structured scoring) | ~90% |
-| **Concurrent retrieval** | Sequential dense → sparse | `asyncio.gather(dense, sparse)` | ~40% |
-| **BM25 index caching** | Full DB scan per query | Cached in-process, invalidated on ingest | ~200ms saved |
-| **Semantic cache** | O(n) per-key cosine loop | Batched MGET + numpy vectorized cosine | ~80% |
-| **Connection pooling** | New httpx client per call | Shared singleton with keep-alive | ~50ms/request |
+**Phase 5** — batched embedding, batched reranking, concurrent dense+sparse,
+in-process BM25 cache, shared httpx pool. Real improvements, but the reranker
+was still 62s per query: the batching reduced *how many* LLM calls reranking
+made without questioning whether it should use an LLM at all.
+
+**Phase 6** — OpenTelemetry span attribution over the whole pipeline, then
+fixes ranked by what the spans actually showed:
+
+| Change | Effect |
+|---|---|
+| LLM reranker → 22M cross-encoder | 62,086 ms → 507 ms |
+| llama3.1:8b → llama3.2:3b (8B ran 58% on CPU in 4GB VRAM) | 34,820 ms → 3,300 ms |
+| Groundedness guardrail moved off the request path | ~8,900 ms removed |
+| Streaming reuses the shared connection pool | one fewer TCP handshake/request |
+
+**Phase 7** — scaling and caching, measured before and after:
+
+| Change | Effect |
+|---|---|
+| pgvector HNSW + `random_page_cost=1.1` | 373 ms → 4.6 ms at 100k, recall@10 0.995 |
+| Semantic cache: local matrix + version counter | 124.5 ms → 0.12 ms at 1k entries |
+| BM25 → Postgres FTS | **rejected** — measured 2.2x slower, kept BM25 |
+
+Two things worth noting, because they are the useful part:
+
+- The HNSW index changed nothing until `random_page_cost` was lowered.
+  Postgres kept choosing a sequential scan over it; the default of 4.0 models
+  spinning-disk seeks and overprices index scans on NVMe. An ANN index can be
+  present, correct, and entirely unused.
+- Replacing BM25 with Postgres FTS looked obviously right and was wrong.
+  Measured at 5k/25k/100k rows, FTS was ~2.2x slower at every size, because
+  question-shaped queries need OR semantics and `ts_rank_cd` then has to score
+  ~16% of the corpus. The change was kept switchable and the default reverted.
 
 ## Guardrails
 
@@ -110,19 +138,41 @@ HALLUCINATION_THRESHOLD=0.7
 
 ## Benchmark Results
 
-> Run benchmarks: `python -m app.scripts.benchmark --queries 20 --base-url http://localhost:8000`
+> `python -m app.scripts.benchmark --queries 5 --skip-throughput`
+> Corpus: 5,869 chunks / 4 documents. Single RTX 3050 Laptop (4GB VRAM).
+> Full methodology and caveats: [docs/eval-results.md](docs/eval-results.md)
 
-| Metric | Dense | Hybrid (RRF) | Hybrid + Rerank |
-|--------|-------|-------------|-----------------|
-| p50 Latency (ms) | — | — | — |
-| p95 Latency (ms) | — | — | — |
-| p99 Latency (ms) | — | — | — |
+| Mode | p50 | Mean |
+|---|---|---|
+| Dense only | 8,522 ms | 8,638 ms |
+| Hybrid (RRF) | 8,409 ms | 8,546 ms |
+| Hybrid + rerank | 8,007 ms | 8,731 ms |
 
 | Cache Metric | Value |
 |---|---|
-| Cache Miss p50 | — |
-| Cache Hit p50 | — |
-| Speedup | — |
+| Cache miss p50 | 9,035 ms |
+| Cache hit p50 | 49 ms |
+| Speedup | **185x** |
+
+All three retrieval modes land within noise of each other: after Phase 6,
+generation dominates end-to-end latency and retrieval is a rounding error
+against it. n=5, so p95/p99 are not reported — at that sample size they are
+just the maximum.
+
+### Per-stage attribution (OpenTelemetry spans)
+
+| Stage | Before | After |
+|---|---|---|
+| Rerank | 62,086 ms | **507 ms** |
+| LLM generation | 34,820 ms | 3,300 ms |
+| Groundedness guardrail (on critical path) | ~8,900 ms | moved off-path |
+| Vector scan | ~15.5 ms | 3.7 ms |
+| Semantic cache lookup @1k entries | 124.5 ms | **0.12 ms** |
+| **End-to-end (hybrid + rerank)** | **117.0 s** | **~8 s** |
+
+The reranker was the dominant cost — an 8B decoder prompted to emit relevance
+scores. Replacing it with a 22M cross-encoder was 123x faster on that stage
+*and* improved retrieval quality (NDCG@10 0.18 -> 0.90, p<0.001).
 
 > _Fill in by running the benchmark script against your deployment._
 
