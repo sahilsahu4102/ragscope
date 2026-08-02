@@ -49,9 +49,7 @@ class GuardrailsPipeline:
     ):
         self.pii_redactor = PIIRedactor() if enable_pii else None
         self.injection_detector = (
-            InjectionDetector(threshold=injection_threshold)
-            if enable_injection
-            else None
+            InjectionDetector(threshold=injection_threshold) if enable_injection else None
         )
         self.hallucination_detector = (
             HallucinationDetector(threshold=hallucination_threshold)

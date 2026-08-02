@@ -160,7 +160,9 @@ async def query_rag(
                 "use_reranker": request.use_reranker,
                 "query_transform": request.query_transform,
                 "model": generator.model,
-                "filters": request.filters.model_dump(exclude_none=True) if request.filters else None,
+                "filters": request.filters.model_dump(exclude_none=True)
+                if request.filters
+                else None,
             },
         )
         db.add(query_record)

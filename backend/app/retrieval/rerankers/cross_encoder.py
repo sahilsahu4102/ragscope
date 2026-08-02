@@ -139,10 +139,7 @@ class OllamaReranker(BaseReranker):
 
             except Exception as e:
                 logger.warning("Batch reranking failed, using fallback scores", error=str(e))
-                scores = [
-                    chunk.get("rrf_score", chunk.get("dense_score", 0.5))
-                    for chunk in chunks
-                ]
+                scores = [chunk.get("rrf_score", chunk.get("dense_score", 0.5)) for chunk in chunks]
 
             # Apply scores to chunks
             scored_chunks = []
@@ -272,9 +269,7 @@ class CrossEncoderReranker(BaseReranker):
                 fallback = OllamaReranker()
                 return await fallback.rerank(query, chunks, top_k)
 
-            pairs = [
-                (query, chunk["content"][: self.MAX_PASSAGE_CHARS]) for chunk in chunks
-            ]
+            pairs = [(query, chunk["content"][: self.MAX_PASSAGE_CHARS]) for chunk in chunks]
 
             # predict() is synchronous CPU work — run it off the event loop so it
             # doesn't stall every other in-flight request.

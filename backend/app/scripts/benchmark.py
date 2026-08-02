@@ -167,12 +167,18 @@ async def run_benchmark(
         dense_latencies = []
         for i, q in enumerate(questions):
             result = await _query(
-                client, base_url, q,
-                use_hybrid=False, use_reranker=False, use_cache=False,
+                client,
+                base_url,
+                q,
+                use_hybrid=False,
+                use_reranker=False,
+                use_cache=False,
             )
             if result["success"]:
                 dense_latencies.append(result["api_latency_ms"])
-            print(f"   [{i + 1}/{len(questions)}] {'✅' if result['success'] else '❌'} {result.get('api_latency_ms', result['elapsed_ms']):.0f}ms")
+            print(
+                f"   [{i + 1}/{len(questions)}] {'✅' if result['success'] else '❌'} {result.get('api_latency_ms', result['elapsed_ms']):.0f}ms"
+            )
         results["dense"] = _percentiles(dense_latencies)
         results["dense"]["count"] = len(dense_latencies)
 
@@ -181,12 +187,18 @@ async def run_benchmark(
         hybrid_latencies = []
         for i, q in enumerate(questions):
             result = await _query(
-                client, base_url, q,
-                use_hybrid=True, use_reranker=False, use_cache=False,
+                client,
+                base_url,
+                q,
+                use_hybrid=True,
+                use_reranker=False,
+                use_cache=False,
             )
             if result["success"]:
                 hybrid_latencies.append(result["api_latency_ms"])
-            print(f"   [{i + 1}/{len(questions)}] {'✅' if result['success'] else '❌'} {result.get('api_latency_ms', result['elapsed_ms']):.0f}ms")
+            print(
+                f"   [{i + 1}/{len(questions)}] {'✅' if result['success'] else '❌'} {result.get('api_latency_ms', result['elapsed_ms']):.0f}ms"
+            )
         results["hybrid"] = _percentiles(hybrid_latencies)
         results["hybrid"]["count"] = len(hybrid_latencies)
 
@@ -195,12 +207,18 @@ async def run_benchmark(
         rerank_latencies = []
         for i, q in enumerate(questions):
             result = await _query(
-                client, base_url, q,
-                use_hybrid=True, use_reranker=True, use_cache=False,
+                client,
+                base_url,
+                q,
+                use_hybrid=True,
+                use_reranker=True,
+                use_cache=False,
             )
             if result["success"]:
                 rerank_latencies.append(result["api_latency_ms"])
-            print(f"   [{i + 1}/{len(questions)}] {'✅' if result['success'] else '❌'} {result.get('api_latency_ms', result['elapsed_ms']):.0f}ms")
+            print(
+                f"   [{i + 1}/{len(questions)}] {'✅' if result['success'] else '❌'} {result.get('api_latency_ms', result['elapsed_ms']):.0f}ms"
+            )
         results["rerank"] = _percentiles(rerank_latencies)
         results["rerank"]["count"] = len(rerank_latencies)
 
@@ -216,8 +234,12 @@ async def run_benchmark(
         miss_latencies = []
         for q in questions[:5]:
             result = await _query(
-                client, base_url, q,
-                use_hybrid=False, use_reranker=False, use_cache=True,
+                client,
+                base_url,
+                q,
+                use_hybrid=False,
+                use_reranker=False,
+                use_cache=True,
             )
             if result["success"]:
                 miss_latencies.append(result["api_latency_ms"])
@@ -226,8 +248,12 @@ async def run_benchmark(
         hit_latencies = []
         for q in questions[:5]:
             result = await _query(
-                client, base_url, q,
-                use_hybrid=False, use_reranker=False, use_cache=True,
+                client,
+                base_url,
+                q,
+                use_hybrid=False,
+                use_reranker=False,
+                use_cache=True,
             )
             if result["success"] and result.get("cached"):
                 hit_latencies.append(result["api_latency_ms"])
@@ -235,7 +261,10 @@ async def run_benchmark(
         results["cache_miss"] = _percentiles(miss_latencies) if miss_latencies else {}
         results["cache_hit"] = _percentiles(hit_latencies) if hit_latencies else {}
         results["cache_hit"]["speedup"] = (
-            round(results["cache_miss"].get("p50", 1) / max(results["cache_hit"].get("p50", 1), 0.1), 1)
+            round(
+                results["cache_miss"].get("p50", 1) / max(results["cache_hit"].get("p50", 1), 0.1),
+                1,
+            )
             if miss_latencies and hit_latencies
             else 0
         )
@@ -250,10 +279,7 @@ async def run_benchmark(
             print("\n📊 Benchmark 5: Throughput (concurrent)...")
             throughput_start = time.perf_counter()
             concurrent_results = await asyncio.gather(
-                *[
-                    _query(client, base_url, q, use_cache=False)
-                    for q in questions[:10]
-                ]
+                *[_query(client, base_url, q, use_cache=False) for q in questions[:10]]
             )
             throughput_elapsed = time.perf_counter() - throughput_start
             successful = sum(1 for r in concurrent_results if r["success"])
@@ -284,7 +310,11 @@ def format_results(results: dict) -> str:
         "|------|----------|----------|----------|-----------|---------|",
     ]
 
-    for mode, label in [("dense", "Dense only"), ("hybrid", "Hybrid (RRF)"), ("rerank", "Hybrid + Rerank")]:
+    for mode, label in [
+        ("dense", "Dense only"),
+        ("hybrid", "Hybrid (RRF)"),
+        ("rerank", "Hybrid + Rerank"),
+    ]:
         d = results.get(mode, {})
         if d:
             lines.append(
@@ -292,13 +322,15 @@ def format_results(results: dict) -> str:
                 f"{d.get('p99', '—')} | {d.get('mean', '—')} | {d.get('count', 0)} |"
             )
 
-    lines.extend([
-        "",
-        "## Cache Performance",
-        "",
-        "| Metric | Value |",
-        "|--------|-------|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Cache Performance",
+            "",
+            "| Metric | Value |",
+            "|--------|-------|",
+        ]
+    )
 
     if results.get("cache_miss"):
         lines.append(f"| Cache Miss p50 | {results['cache_miss'].get('p50', '—')} ms |")
@@ -306,13 +338,15 @@ def format_results(results: dict) -> str:
         lines.append(f"| Cache Hit p50 | {results['cache_hit'].get('p50', '—')} ms |")
         lines.append(f"| Speedup | {results['cache_hit'].get('speedup', '—')}x |")
 
-    lines.extend([
-        "",
-        "## Throughput",
-        "",
-        "| Metric | Value |",
-        "|--------|-------|",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Throughput",
+            "",
+            "| Metric | Value |",
+            "|--------|-------|",
+        ]
+    )
 
     if results.get("throughput"):
         t = results["throughput"]
@@ -328,7 +362,9 @@ async def main():
     parser = argparse.ArgumentParser(description="RAGScope Benchmark Suite")
     parser.add_argument("--queries", type=int, default=20, help="Number of queries per benchmark")
     parser.add_argument("--warmup", type=int, default=3, help="Warmup queries")
-    parser.add_argument("--base-url", type=str, default="http://localhost:8000", help="API base URL")
+    parser.add_argument(
+        "--base-url", type=str, default="http://localhost:8000", help="API base URL"
+    )
     parser.add_argument("--output", type=str, default=None, help="Output file path for results")
     parser.add_argument(
         "--skip-throughput",

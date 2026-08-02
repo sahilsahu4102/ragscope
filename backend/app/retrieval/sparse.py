@@ -57,6 +57,7 @@ class SparseRetriever:
 
         # Check if cache is still valid (chunk count matches)
         from sqlalchemy import func
+
         count_result = await self.db.execute(select(func.count(Chunk.id)))
         current_count = count_result.scalar() or 0
 

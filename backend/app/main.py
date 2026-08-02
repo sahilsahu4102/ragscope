@@ -91,6 +91,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Shutdown ──────────────────────────────
     logger.info("Shutting down RAGScope")
     from app.http_client import close_http_client
+
     await close_http_client()
     await engine.dispose()
 
@@ -137,6 +138,7 @@ def create_app() -> FastAPI:
             from sqlalchemy import text
 
             from app.db.session import async_session
+
             async with async_session() as session:
                 await session.execute(text("SELECT 1"))
             checks["postgres"] = "ok"
@@ -147,6 +149,7 @@ def create_app() -> FastAPI:
         # Check Redis
         try:
             import redis.asyncio as redis_mod
+
             r = redis_mod.from_url(settings.redis_url, decode_responses=True)
             await r.ping()
             await r.aclose()

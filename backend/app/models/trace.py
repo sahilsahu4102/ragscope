@@ -29,14 +29,10 @@ class Trace(Base):
 
     __tablename__ = "traces"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     # OTel trace id (128-bit) rendered as 32-char hex — links spans together
-    otel_trace_id: Mapped[str] = mapped_column(
-        String(32), nullable=False, unique=True, index=True
-    )
+    otel_trace_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True, index=True)
 
     # Optional link back to the query that produced this trace
     query_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -75,9 +71,7 @@ class Span(Base):
 
     __tablename__ = "spans"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     trace_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("traces.id", ondelete="CASCADE"), nullable=False
     )

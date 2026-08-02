@@ -88,12 +88,8 @@ class RetrievalFilters(BaseModel):
     min_score: float | None = Field(
         default=None, ge=0.0, le=1.0, description="Minimum cosine similarity threshold"
     )
-    min_tokens: int | None = Field(
-        default=None, ge=1, description="Minimum chunk token count"
-    )
-    max_tokens: int | None = Field(
-        default=None, ge=1, description="Maximum chunk token count"
-    )
+    min_tokens: int | None = Field(default=None, ge=1, description="Minimum chunk token count")
+    max_tokens: int | None = Field(default=None, ge=1, description="Maximum chunk token count")
 
 
 class QueryRequest(BaseModel):
