@@ -199,6 +199,58 @@ budget, against a ~4.6ms HNSW dense side. The fix at that scale is a
 purpose-built lexical index (pg_search / ParadeDB, or an external engine),
 not tuning either of these.
 
+## Semantic cache lookup
+
+A cache hit measured ~49ms, and the suspected culprit was the `KEYS` glob —
+an O(keyspace) call that blocks Redis. Measuring the lookup by cache size
+showed the real distribution:
+
+| entries | KEYS | MGET | parse+cosine | total |
+|---|---|---|---|---|
+| 50 | 0.5 ms | 1.1 ms | 4.7 ms | 6.3 ms |
+| 250 | 1.0 ms | 4.0 ms | 21.4 ms | 26.4 ms |
+| 1,000 | 2.5 ms | 19.3 ms | **102.7 ms** | 124.5 ms |
+
+`KEYS` is 2.5ms of 124.5ms. The cost was JSON-decoding every cached embedding
+— 1,000 x 768 floats — on every single query.
+
+Fix: hold the embeddings in a process-local L2-normalised matrix and refetch
+only when a Redis version counter moves. Steady state is one small GET for the
+version, a matmul, and one GET to confirm the winning entry.
+
+| entries | before | after |
+|---|---|---|
+| 50 | 6.3 ms | **0.22 ms** |
+| 250 | 26.4 ms | **0.24 ms** |
+| 1,000 | 124.5 ms | **0.12 ms** |
+
+Lookup no longer scales with cache size.
+
+Two correctness properties the version counter buys, both tested: a second
+worker's writes are visible (it bumps the version, every process resyncs), and
+a TTL-expired entry is never served — expiry does not bump the version, so the
+winning key is confirmed with a GET before its answer is returned.
+
+### What this does not fix
+
+A cache hit is still ~38-58ms, because the embedding call dominates:
+
+    embed         58.50 ms   (98.6% of a 59.30 ms hit)
+    KEYS           0.34 ms
+    MGET           0.24 ms
+    parse+cosine   0.24 ms
+
+Batching shows why: 8 texts cost 65ms and 32 cost 183ms, implying ~26-40ms of
+fixed overhead and ~5ms per text. A single embedding is almost entirely HTTP
+round-trip to Ollama, not inference.
+
+Removing that means running the encoder in-process, which means either a
+different model (re-embedding 5,869 chunks and changing the vector dimension)
+or the same model unquantised (whose embeddings would not match the quantised
+GGUF vectors already in the index). Against an ~8s end-to-end query dominated
+by generation, saving ~50ms is under 1%, so it was not worth the migration
+risk. Recorded rather than done.
+
 ## Limitations
 
 - Latency n=5 per mode. The p95/p99 columns the benchmark prints are

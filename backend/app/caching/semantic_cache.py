@@ -8,7 +8,21 @@ return the cached answer instead of re-running the full pipeline.
 Phase 5 optimizations:
   - Batched Redis MGET instead of sequential per-key GET
   - Vectorized numpy cosine similarity (all entries at once, not loop)
-  - ~80% faster for warm caches with many entries
+
+Phase 7: the lookup fetched and JSON-decoded *every* cached embedding on
+*every* query. Measured cost by cache size:
+
+    entries    KEYS    MGET    parse+cosine    total
+         50   0.5ms   1.1ms          4.7ms    6.3ms
+        250   1.0ms   4.0ms         21.4ms   26.4ms
+      1,000   2.5ms  19.3ms        102.7ms  124.5ms
+
+Parsing dominates — 1,000 x 768 floats decoded from JSON per query. KEYS,
+the obvious-looking culprit, is 2.5ms of 124.5ms.
+
+The embeddings are now held in a process-local normalised matrix and only
+refetched when a Redis version counter changes, so the steady-state lookup is
+one small GET plus a numpy matmul.
 """
 
 import hashlib
@@ -25,6 +39,13 @@ from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
 tracer = get_tracer("caching")
+
+# ── Process-local mirror of the cached embeddings ──
+# Keyed by the Redis version counter: if it has not moved, the matrix is
+# current and no payload needs fetching.
+_local_version: int | None = None
+_local_keys: list[bytes] = []
+_local_matrix: np.ndarray | None = None  # L2-normalised, shape (n, dim)
 
 
 class SemanticCache:
@@ -45,6 +66,9 @@ class SemanticCache:
     # never touch the hit/miss counters.
     HITS_KEY = "ragscope:cache_metrics:hits"
     MISSES_KEY = "ragscope:cache_metrics:misses"
+    # Bumped on write/invalidate. Every worker watches it to know whether its
+    # local embedding matrix is stale.
+    VERSION_KEY = "ragscope:cache_metrics:version"
 
     def __init__(
         self,
@@ -65,13 +89,52 @@ class SemanticCache:
             )
         return self._redis
 
+    async def _sync_local(self, r: redis.Redis) -> None:
+        """Refresh the process-local embedding matrix if Redis has moved on.
+
+        The version counter is bumped by put() and invalidate_all(). When it
+        is unchanged the local matrix is already current, so the steady-state
+        cost of a lookup is one small GET rather than fetching and decoding
+        every cached embedding.
+        """
+        global _local_version, _local_keys, _local_matrix
+
+        raw_version = await r.get(self.VERSION_KEY)
+        version = int(raw_version) if raw_version else 0
+
+        if version == _local_version and _local_matrix is not None:
+            return
+
+        keys = await r.keys(f"{self.CACHE_PREFIX}:*")
+        if not keys:
+            _local_version, _local_keys, _local_matrix = version, [], None
+            return
+
+        raw_values = await r.mget(keys)
+        live_keys: list[bytes] = []
+        vecs: list[list[float]] = []
+        for key, raw in zip(keys, raw_values, strict=True):
+            if raw is None:
+                continue  # expired between KEYS and MGET
+            try:
+                vecs.append(json.loads(raw)["query_embedding"])
+                live_keys.append(key)
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+
+        if not vecs:
+            _local_version, _local_keys, _local_matrix = version, [], None
+            return
+
+        matrix = np.array(vecs, dtype=np.float32)
+        matrix /= np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-10
+
+        _local_version, _local_keys, _local_matrix = version, live_keys, matrix
+        logger.info("Semantic cache matrix synced", entries=len(live_keys), version=version)
+
     async def get(self, query: str) -> dict | None:
         """
         Check if a semantically similar query is cached.
-
-        Phase 5: Uses batched MGET + vectorized numpy cosine instead of
-        sequential per-key GET + per-entry cosine loop. ~80% faster for
-        warm caches.
 
         Returns cached response dict or None.
         """
@@ -87,75 +150,61 @@ class SemanticCache:
             try:
                 r = await self._get_redis()
 
-                # Embed the query
                 query_embeddings = await self.embedder.embed([query])
                 query_vec = np.array(query_embeddings[0], dtype=np.float32)
+                query_vec /= np.linalg.norm(query_vec) + 1e-10
 
-                # Get all cached entry keys
-                keys = await r.keys(f"{self.CACHE_PREFIX}:*")
-                if not keys:
+                await self._sync_local(r)
+                if _local_matrix is None or not _local_keys:
                     await r.incr(self.MISSES_KEY)
                     return None
 
-                # Batched MGET — one round-trip instead of N
-                raw_values = await r.mget(keys)
-
-                entries = []
-                cached_vecs = []
-                for raw in raw_values:
-                    if raw is None:
-                        continue
-                    try:
-                        entry = json.loads(raw)
-                        entries.append(entry)
-                        cached_vecs.append(entry["query_embedding"])
-                    except (json.JSONDecodeError, KeyError):
-                        continue
-
-                if not entries:
-                    await r.incr(self.MISSES_KEY)
-                    return None
-
-                # Vectorized cosine similarity — all entries at once
-                cached_matrix = np.array(cached_vecs, dtype=np.float32)
-                # Normalize vectors
-                query_norm = query_vec / (np.linalg.norm(query_vec) + 1e-10)
-                cached_norms = cached_matrix / (
-                    np.linalg.norm(cached_matrix, axis=1, keepdims=True) + 1e-10
-                )
-                # Dot product of normalized vectors = cosine similarity
-                similarities = cached_norms @ query_norm
-
+                similarities = _local_matrix @ query_vec
                 best_idx = int(np.argmax(similarities))
                 best_similarity = float(similarities[best_idx])
 
-                if best_similarity >= self.threshold:
-                    best_match = entries[best_idx]
+                if best_similarity < self.threshold:
                     logger.info(
-                        "Semantic cache HIT",
-                        similarity=round(best_similarity, 4),
-                        cached_query=best_match.get("query", "")[:80],
+                        "Semantic cache MISS",
+                        best_similarity=round(best_similarity, 4),
+                        threshold=self.threshold,
                     )
-                    await r.incr(self.HITS_KEY)
-                    return {
-                        "answer": best_match["answer"],
-                        "citations": best_match.get("citations", []),
-                        "cached": True,
-                        "cache_similarity": round(best_similarity, 4),
-                        "original_latency_ms": best_match.get("latency_ms", 0),
-                    }
+                    await r.incr(self.MISSES_KEY)
+                    return None
 
+                # The matrix can outlive its entries: TTL expiry does not bump
+                # the version. Fetch only the winning key to confirm.
+                raw = await r.get(_local_keys[best_idx])
+                if raw is None:
+                    # Expired since the last sync — force a rebuild next call
+                    # rather than serving a stale answer.
+                    self._invalidate_local()
+                    await r.incr(self.MISSES_KEY)
+                    return None
+
+                best_match = json.loads(raw)
                 logger.info(
-                    "Semantic cache MISS",
-                    best_similarity=round(best_similarity, 4),
-                    threshold=self.threshold,
+                    "Semantic cache HIT",
+                    similarity=round(best_similarity, 4),
+                    cached_query=best_match.get("query", "")[:80],
                 )
-                await r.incr(self.MISSES_KEY)
-                return None
+                await r.incr(self.HITS_KEY)
+                return {
+                    "answer": best_match["answer"],
+                    "citations": best_match.get("citations", []),
+                    "cached": True,
+                    "cache_similarity": round(best_similarity, 4),
+                    "original_latency_ms": best_match.get("latency_ms", 0),
+                }
 
             except Exception as e:
                 logger.warning("Semantic cache lookup failed", error=str(e))
                 return None
+
+    @staticmethod
+    def _invalidate_local() -> None:
+        global _local_version, _local_keys, _local_matrix
+        _local_version, _local_keys, _local_matrix = None, [], None
 
     async def put(
         self,
@@ -190,6 +239,8 @@ class SemanticCache:
                     self.ttl,
                     json.dumps(entry),
                 )
+                # Signal every worker that its local matrix is stale.
+                await r.incr(self.VERSION_KEY)
 
                 logger.info("Query cached", key=cache_key, ttl=self.ttl)
 
@@ -203,6 +254,8 @@ class SemanticCache:
             keys = await r.keys(f"{self.CACHE_PREFIX}:*")
             if keys:
                 deleted = await r.delete(*keys)
+                await r.incr(self.VERSION_KEY)
+                self._invalidate_local()
                 logger.info("Semantic cache cleared", deleted=deleted)
                 return deleted
             return 0
