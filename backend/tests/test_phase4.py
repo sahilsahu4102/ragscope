@@ -246,6 +246,7 @@ def test_experiment_response_schema():
         deltas={"faithfulness": {"delta": 0.1, "winner": "B"}},
         created_at="2026-07-18T00:00:00Z",
     )
+    assert r.deltas is not None
     assert r.deltas["faithfulness"]["winner"] == "B"
 
 
