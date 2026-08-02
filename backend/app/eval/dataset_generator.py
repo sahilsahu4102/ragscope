@@ -216,9 +216,7 @@ class DatasetGenerator:
                                 # Only the chunks actually cited — not every
                                 # chunk that happened to be in the batch.
                                 "source_chunk_ids": [str(c.id) for c in cited],
-                                "source_documents": sorted(
-                                    {c.document.filename for c in cited}
-                                ),
+                                "source_documents": sorted({c.document.filename for c in cited}),
                             },
                         }
                     )

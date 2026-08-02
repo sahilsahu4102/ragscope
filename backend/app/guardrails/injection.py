@@ -142,9 +142,12 @@ class InjectionDetector:
         confidence = min(1.0, confidence)
 
         risk_level = (
-            "critical" if confidence >= 0.85
-            else "high" if confidence >= 0.70
-            else "medium" if confidence >= 0.50
+            "critical"
+            if confidence >= 0.85
+            else "high"
+            if confidence >= 0.70
+            else "medium"
+            if confidence >= 0.50
             else "low"
         )
 

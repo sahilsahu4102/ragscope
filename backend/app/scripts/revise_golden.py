@@ -36,12 +36,9 @@ DROP = {13, 26}
 REVISIONS: dict[int, dict] = {
     1: {
         "question": (
-            "What is the range of per-GPU model state size saved during "
-            "Llama 3 checkpointing?"
+            "What is the range of per-GPU model state size saved during Llama 3 checkpointing?"
         ),
-        "gold_answer": (
-            "Each GPU's model state ranges from 1 MB to 4 GB per GPU."
-        ),
+        "gold_answer": ("Each GPU's model state ranges from 1 MB to 4 GB per GPU."),
         "question_type": "factual",
     },
     2: {
@@ -61,9 +58,7 @@ REVISIONS: dict[int, dict] = {
             "Why does the synchronous nature of Llama 3's 16K-GPU training make "
             "it less fault-tolerant?"
         ),
-        "gold_answer": (
-            "Because a single GPU failure may require a restart of the entire job."
-        ),
+        "gold_answer": ("Because a single GPU failure may require a restart of the entire job."),
         "question_type": "reasoning",
     },
     21: {
@@ -118,9 +113,7 @@ def main() -> None:
             if patch:
                 ctx_filter = patch.pop("context_filter", None)
                 if ctx_filter:
-                    filtered = [
-                        c for c in sample["gold_contexts"] if ctx_filter in c
-                    ]
+                    filtered = [c for c in sample["gold_contexts"] if ctx_filter in c]
                     # Only narrow if the filter actually matched something —
                     # never leave a sample with zero gold contexts.
                     if filtered:

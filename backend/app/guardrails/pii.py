@@ -32,9 +32,7 @@ _PII_PATTERNS: list[tuple[str, str, re.Pattern]] = [
     (
         "phone_us",
         "[PHONE_REDACTED]",
-        re.compile(
-            r"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"
-        ),
+        re.compile(r"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"),
     ),
     (
         "phone_intl",
@@ -49,16 +47,12 @@ _PII_PATTERNS: list[tuple[str, str, re.Pattern]] = [
     (
         "credit_card",
         "[CC_REDACTED]",
-        re.compile(
-            r"\b(?:\d{4}[-\s]?){3}\d{4}\b"
-        ),
+        re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b"),
     ),
     (
         "ipv4",
         "[IP_REDACTED]",
-        re.compile(
-            r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"
-        ),
+        re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"),
     ),
 ]
 
@@ -82,12 +76,14 @@ class PIIRedactor:
         findings: list[dict] = []
         for pii_type, _, pattern in self.patterns:
             for match in pattern.finditer(text):
-                findings.append({
-                    "type": pii_type,
-                    "original": match.group(),
-                    "start": match.start(),
-                    "end": match.end(),
-                })
+                findings.append(
+                    {
+                        "type": pii_type,
+                        "original": match.group(),
+                        "start": match.start(),
+                        "end": match.end(),
+                    }
+                )
         return findings
 
     def redact(self, text: str) -> tuple[str, list[dict]]:
@@ -98,15 +94,13 @@ class PIIRedactor:
         for pii_type, replacement, pattern in self.patterns:
             matches = list(pattern.finditer(redacted))
             for match in reversed(matches):  # Reverse to preserve positions
-                findings.append({
-                    "type": pii_type,
-                    "original": match.group(),
-                })
-                redacted = (
-                    redacted[: match.start()]
-                    + replacement
-                    + redacted[match.end() :]
+                findings.append(
+                    {
+                        "type": pii_type,
+                        "original": match.group(),
+                    }
                 )
+                redacted = redacted[: match.start()] + replacement + redacted[match.end() :]
 
         if findings:
             logger.info(
