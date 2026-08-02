@@ -151,6 +151,13 @@ class DenseRetriever:
 
             params["top_k"] = fetch_limit
 
+            # HNSW search breadth. Must be >= the row count we ask for, or the
+            # index returns fewer candidates than requested. SET LOCAL keeps it
+            # scoped to this transaction rather than leaking to other queries
+            # sharing the connection pool.
+            ef_search = max(settings.hnsw_ef_search, fetch_limit)
+            await self.db.execute(text(f"SET LOCAL hnsw.ef_search = {ef_search}"))
+
             result = await self.db.execute(sql, params)
             rows = result.fetchall()
 
@@ -180,18 +187,18 @@ class DenseRetriever:
             if raw_min_tokens is not None:
                 floor = int(str(raw_min_tokens))
                 chunks = [
-                    c for c in chunks
-                    if c.get("token_count") is not None
-                    and int(str(c["token_count"])) >= floor
+                    c
+                    for c in chunks
+                    if c.get("token_count") is not None and int(str(c["token_count"])) >= floor
                 ]
 
             raw_max_tokens = filters.get("max_tokens")
             if raw_max_tokens is not None:
                 ceiling = int(str(raw_max_tokens))
                 chunks = [
-                    c for c in chunks
-                    if c.get("token_count") is not None
-                    and int(str(c["token_count"])) <= ceiling
+                    c
+                    for c in chunks
+                    if c.get("token_count") is not None and int(str(c["token_count"])) <= ceiling
                 ]
 
             # Trim to requested top_k after post-filtering
@@ -204,9 +211,7 @@ class DenseRetriever:
                 top_score=chunks[0]["dense_score"] if chunks else 0,
                 pre_filters=len(where_clauses) - 1,  # minus the IS NOT NULL
                 post_filters=sum(
-                    1
-                    for k in ("min_score", "min_tokens", "max_tokens")
-                    if filters.get(k)
+                    1 for k in ("min_score", "min_tokens", "max_tokens") if filters.get(k)
                 ),
             )
 
