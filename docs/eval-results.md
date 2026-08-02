@@ -164,6 +164,40 @@ The vector scan got ~4x faster while the corpus grew 2.8x. BM25 moved the
 other way — it is an in-memory O(N) scorer, so it grows with the corpus and
 will need replacing with Postgres FTS well before 100k chunks.
 
+## Sparse retrieval: BM25 vs Postgres FTS
+
+BM25 regressed as the corpus grew (9.2ms at 2,094 chunks -> 20.4ms at 5,869),
+which looked like the in-process O(N) scorer starting to lose. A GIN-indexed
+tsvector was added to replace it.
+
+Measured, that was wrong (app/scripts/sparse_scale.py, same synthetic text
+corpus sampled from real chunks, same queries):
+
+| rows | postgres_fts p50 | bm25 p50 | bm25 index build |
+|---|---|---|---|
+| 5,000 | 15.1 ms | **6.4 ms** | 0.1s |
+| 25,000 | 104.4 ms | **45.3 ms** | 0.4s |
+| 100,000 | 423.2 ms | **188.8 ms** | 1.5s |
+
+BM25 is ~2.2x faster at every size tested. There is no crossover in this range.
+
+The cause is ranking rather than lookup. Question-shaped queries need OR
+semantics — `plainto_tsquery` and `websearch_to_tsquery` both AND their terms,
+and the question *"Why does the synchronous nature of Llama 3 16K-GPU training
+make it less fault-tolerant"* matched **0** chunks under AND versus **923**
+under OR. OR then matches ~16% of the corpus, so `ts_rank_cd` scores and sorts
+~16k rows at 100k. The GIN index finds candidates fast; scoring them is the
+cost.
+
+So the default stayed `bm25`. `postgres_fts` is kept and wired for A/B because
+its advantages are real but operational, not latency: no per-worker memory, no
+rebuild stall after ingestion, correct across multiple workers.
+
+Neither is acceptable at 100k — 189ms and 423ms both dominate the retrieval
+budget, against a ~4.6ms HNSW dense side. The fix at that scale is a
+purpose-built lexical index (pg_search / ParadeDB, or an external engine),
+not tuning either of these.
+
 ## Limitations
 
 - Latency n=5 per mode. The p95/p99 columns the benchmark prints are

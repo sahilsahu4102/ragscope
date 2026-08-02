@@ -39,6 +39,14 @@ INDEXES: list[tuple[str, str]] = [
         "ix_chunks_embedding_hnsw",
         "chunks USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)",
     ),
+    ("ix_chunks_content_tsv", "chunks USING gin (content_tsv)"),
+]
+
+# Generated columns that create_all() will not add to an existing table.
+# Must be applied before the indexes that depend on them.
+COLUMNS: list[str] = [
+    "ALTER TABLE chunks ADD COLUMN IF NOT EXISTS content_tsv tsvector "
+    "GENERATED ALWAYS AS (to_tsvector('english', content)) STORED",
 ]
 
 
@@ -56,6 +64,14 @@ async def main_async(concurrently: bool) -> None:
     async with async_session() as session:
         present = await existing_indexes(session, "chunks")
         print(f"existing indexes on chunks: {sorted(present) or 'none'}")
+
+    # Columns first — the GIN index depends on content_tsv existing.
+    for ddl in COLUMNS:
+        print(f"  column {ddl.split()[5]} ...", end="", flush=True)
+        t0 = time.perf_counter()
+        async with engine.begin() as conn:
+            await conn.execute(text(ddl))
+        print(f" done in {time.perf_counter() - t0:.1f}s")
 
     for name, body in INDEXES:
         if name in present:

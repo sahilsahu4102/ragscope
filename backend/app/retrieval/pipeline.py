@@ -14,6 +14,7 @@ import asyncio
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.session import async_session
 from app.observability.tracer import create_span, get_tracer
 from app.retrieval.dense import DenseRetriever
 from app.retrieval.fusion import reciprocal_rank_fusion
@@ -43,6 +44,21 @@ class RetrievalPipeline:
         self.sparse_retriever = SparseRetriever(db)
         self.query_transformer = QueryTransformer()
 
+    async def _sparse_isolated(
+        self,
+        query: str,
+        top_k: int,
+        backend: str | None = None,
+    ) -> list[dict]:
+        """Run sparse retrieval on a dedicated session.
+
+        Needed because this is gathered concurrently with dense retrieval, and
+        a single AsyncSession cannot service two operations at once.
+        """
+        async with async_session() as session:
+            retriever = SparseRetriever(session, backend=backend)
+            return await retriever.retrieve(query=query, top_k=top_k)
+
     async def retrieve(
         self,
         query: str,
@@ -53,6 +69,7 @@ class RetrievalPipeline:
         rrf_k: int = 60,
         filters: dict | None = None,
         reranker_backend: str | None = None,
+        sparse_backend: str | None = None,
     ) -> list[dict]:
         """
         Run the full retrieval pipeline.
@@ -68,6 +85,7 @@ class RetrievalPipeline:
             reranker_backend: "cross_encoder" | "ollama". None uses the
                 configured default. Exposed so A/B experiments can vary the
                 reranker without changing global settings.
+            sparse_backend: "postgres_fts" | "bm25". Same rationale.
 
         Returns:
             Ranked list of chunk dicts with scores from each stage.
@@ -124,15 +142,21 @@ class RetrievalPipeline:
                 # Phase 5: Run both retrievers in parallel via asyncio.gather
                 # This cuts ~40% off hybrid retrieval time since the two
                 # are independent I/O-bound operations.
+                # Sparse runs on its own session: an AsyncSession does not
+                # support concurrent operations, and now that the FTS backend
+                # is a plain DB query both sides genuinely overlap. Previously
+                # this was masked by dense spending its first ~30ms on the HTTP
+                # embedding call while BM25 finished its query.
                 dense_results, sparse_results = await asyncio.gather(
                     self.dense_retriever.retrieve(
                         query=effective_query,
                         top_k=fetch_k,
                         filters=filters,
                     ),
-                    self.sparse_retriever.retrieve(
+                    self._sparse_isolated(
                         query=effective_query,
                         top_k=fetch_k,
+                        backend=sparse_backend,
                     ),
                 )
 
