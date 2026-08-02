@@ -108,6 +108,20 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ── Sparse retrieval ──────────────────────
+    sparse_backend: str = Field(
+        default="bm25",
+        description=(
+            "'bm25' (in-process rank-bm25) or 'postgres_fts' (GIN-indexed "
+            "tsvector + ts_rank_cd). bm25 is the default because it measured "
+            "~2.2x faster at every corpus size tested — 6.4 vs 15.1ms at 5k, "
+            "45 vs 104ms at 25k, 189 vs 423ms at 100k (app/scripts/"
+            "sparse_scale.py). postgres_fts avoids bm25's per-worker memory "
+            "and its rebuild-on-ingest stall, so it is the better choice under "
+            "multiple workers or frequent ingestion — but not for latency."
+        ),
+    )
+
     # ── Reranking ─────────────────────────────
     reranker_backend: str = Field(
         default="cross_encoder",

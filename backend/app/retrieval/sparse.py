@@ -1,21 +1,50 @@
 """
-RAGScope — BM25 Sparse Retrieval (Phase 5 — Optimized)
+RAGScope — Sparse (lexical) Retrieval
 
-In-memory BM25 search using rank-bm25 library.
-Catches exact terms (product codes, proper nouns) that dense retrieval misses.
+Catches exact terms — product codes, proper nouns, acronyms — that dense
+retrieval misses.
 
-Phase 5: Module-level BM25 index cache — built once, reused across requests.
-Invalidated when new documents are ingested. Saves ~200ms per hybrid query
-by not re-loading all chunks from Postgres on every request.
+Two backends, selected by settings.sparse_backend.
+
+  bm25 (default)
+      In-process rank-bm25. Scores the entire corpus in numpy per query, holds
+      a copy per worker process, and must be rebuilt after ingestion.
+
+  postgres_fts
+      GIN-indexed tsvector column ranked with ts_rank_cd. Shared across
+      workers, no warm-up, stays correct after ingestion with no invalidation.
+
+FTS was added on the assumption that BM25's O(N) scoring would lose at scale.
+Measured (app/scripts/sparse_scale.py), it does not:
+
+    rows       postgres_fts     bm25
+    5,000          15.1 ms     6.4 ms
+    25,000        104.4 ms    45.3 ms
+    100,000       423.2 ms   188.8 ms
+
+BM25 is ~2.2x faster at every size tested; there is no crossover in this
+range. The reason is ranking, not lookup: question-shaped queries need OR
+semantics (AND matches nothing — see _retrieve_fts), OR matches ~16% of the
+corpus, and ts_rank_cd has to score and sort all of it. The GIN index finds
+candidates quickly; scoring them is the cost.
+
+So the default stayed bm25. postgres_fts is kept because its advantages are
+real but operational rather than latency: no per-worker memory, no rebuild
+stall after ingestion, and correctness across multiple workers.
+
+Neither is good at 100k (189ms and 423ms both dominate the retrieval budget).
+The real fix at that scale is a purpose-built lexical index — pg_search /
+ParadeDB, or an external engine — not tuning either of these.
 """
 
 from __future__ import annotations
 
 import structlog
 from rank_bm25 import BM25Okapi
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models import Chunk, Document
 from app.observability.tracer import create_span, get_tracer
 
@@ -39,17 +68,78 @@ def invalidate_bm25_cache() -> None:
 
 class SparseRetriever:
     """
-    BM25 keyword-based retrieval.
+    Lexical retrieval, backed by Postgres FTS or in-process BM25.
 
-    Loads all chunks into an in-memory BM25 index, scores by term overlap.
-    Complements dense retrieval for exact-match queries (codes, names, acronyms).
-
-    Phase 5: Uses module-level index cache — built once on first query,
-    reused across requests until invalidated by new ingestion.
+    Complements dense retrieval for exact-match queries (codes, names,
+    acronyms). Backend comes from settings.sparse_backend; pass `backend` to
+    override per request for A/B comparison.
     """
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, backend: str | None = None):
         self.db = db
+        self.backend = (backend or settings.sparse_backend).lower()
+
+    async def _retrieve_fts(self, query: str, top_k: int) -> list[dict]:
+        """Rank with ts_rank_cd over the GIN-indexed tsvector column.
+
+        Term combination matters more than it looks. Both plainto_tsquery and
+        websearch_to_tsquery AND their terms together, so a natural-language
+        question requires *every* term to appear in one chunk. Measured on this
+        corpus, the question "Why does the synchronous nature of Llama 3
+        16K-GPU training make it less fault-tolerant" matched 0 chunks under
+        AND and 923 under OR. AND semantics would silently delete the sparse
+        arm of hybrid retrieval for question-shaped queries.
+
+        So the query is built by letting plainto_tsquery do normalisation —
+        stemming ('synchronous' -> 'synchron'), stopword removal, punctuation
+        handling — then rewriting its '&' operators to '|'. Hand-tokenising
+        would lose the stemming and the dictionary.
+
+        NULLIF guards a query that is entirely stopwords: to_tsquery('') raises,
+        whereas NULL simply matches nothing.
+
+        ts_rank_cd is cover-density ranking — it rewards matched terms
+        appearing close together. It is not BM25; there is no document-length
+        saturation term, so ranking differs from the legacy backend. That is
+        why bm25 stays available for A/B rather than being deleted.
+        """
+        sql = text("""
+            WITH q AS (
+                SELECT to_tsquery(
+                    'english',
+                    NULLIF(replace(plainto_tsquery('english', :query)::text, '&', '|'), '')
+                ) AS tsq
+            )
+            SELECT
+                c.id,
+                c.content,
+                c.element_type,
+                c.chunk_index,
+                c.token_count,
+                c.metadata,
+                d.filename AS document_name,
+                ts_rank_cd(c.content_tsv, q.tsq) AS score
+            FROM chunks c
+            JOIN documents d ON c.document_id = d.id
+            CROSS JOIN q
+            WHERE q.tsq IS NOT NULL AND c.content_tsv @@ q.tsq
+            ORDER BY score DESC
+            LIMIT :top_k
+        """)
+        rows = (await self.db.execute(sql, {"query": query, "top_k": top_k})).fetchall()
+        return [
+            {
+                "chunk_id": str(r.id),
+                "content": r.content,
+                "document_name": r.document_name,
+                "element_type": r.element_type,
+                "chunk_index": r.chunk_index,
+                "token_count": r.token_count,
+                "metadata": r.metadata or {},
+                "sparse_score": float(r.score),
+            }
+            for r in rows
+        ]
 
     async def _build_index(self) -> tuple[BM25Okapi | None, list[dict]]:
         """Build BM25 index from all chunks in the database."""
@@ -116,7 +206,7 @@ class SparseRetriever:
         top_k: int = 20,
     ) -> list[dict]:
         """
-        Retrieve top-k chunks by BM25 score.
+        Retrieve top-k chunks by lexical relevance.
 
         Returns list of dicts with sparse_score field.
         """
@@ -125,10 +215,20 @@ class SparseRetriever:
             "sparse_retrieve",
             "RETRIEVER",
             {
-                "retriever.type": "bm25",
+                "retriever.type": self.backend,
                 "retriever.top_k": top_k,
             },
         ):
+            if self.backend == "postgres_fts":
+                results = await self._retrieve_fts(query, top_k)
+                logger.info(
+                    "Sparse retrieval complete",
+                    backend="postgres_fts",
+                    results=len(results),
+                    top_score=results[0]["sparse_score"] if results else 0,
+                )
+                return results
+
             index, chunks = await self._build_index()
 
             if not chunks or index is None:

@@ -76,6 +76,7 @@ class EvalRunner:
             # None => whatever settings.reranker_backend says. Recorded in the
             # snapshot so a run is reproducible from its own config.
             "reranker_backend": config.get("reranker_backend", settings.reranker_backend),
+            "sparse_backend": config.get("sparse_backend", settings.sparse_backend),
             "use_llm_judge": self.use_llm_judge,
         }
 
@@ -199,6 +200,7 @@ class EvalRunner:
                 query_transform=config.get("query_transform", "none"),
                 rrf_k=config.get("rrf_k", settings.rrf_k),
                 reranker_backend=config.get("reranker_backend"),
+                sparse_backend=config.get("sparse_backend"),
             )
             retrieval_latency = round((time.time() - retrieval_start) * 1000, 2)
 

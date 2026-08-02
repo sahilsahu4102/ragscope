@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    Computed,
     DateTime,
     Float,
     ForeignKey,
@@ -22,7 +23,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -80,6 +81,16 @@ class Chunk(Base):
         comment="Parent chunk ID for hierarchical chunking",
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Lexical search vector, maintained by Postgres itself — a STORED generated
+    # column stays in sync on insert/update with no trigger and no application
+    # code. Replaces the in-process BM25 index, which was O(N) per query, held
+    # per worker, and grew with the corpus (9.2ms at 2k chunks -> 20.4ms at
+    # 5.9k, heading for ~350ms at 100k).
+    content_tsv: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('english', content)", persisted=True),
+        nullable=True,
+    )
     contextual_summary: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
@@ -126,6 +137,9 @@ class Chunk(Base):
             postgresql_with={"m": 16, "ef_construction": 64},
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
+        # GIN index over the lexical vector — this is what makes FTS an index
+        # lookup instead of a scan.
+        Index("ix_chunks_content_tsv", "content_tsv", postgresql_using="gin"),
     )
 
 
