@@ -72,8 +72,44 @@ Generation metrics (`faithfulness`, `answer_relevance`, `hallucination_score`)
 are heuristic, computed without the LLM judge. They are useful for detecting
 regression between variants, not as absolute quality scores.
 
+## Latency
+
+Measured after Phase 6, 5 queries per mode, questions drawn from golden-v2 so
+they are answerable from the indexed corpus.
+
+| Mode | p50 | Mean |
+|---|---|---|
+| Dense only | 8,522 ms | 8,638 ms |
+| Hybrid (RRF) | 8,409 ms | 8,546 ms |
+| Hybrid + rerank | 8,007 ms | 8,731 ms |
+| Cache hit | **49 ms** | — |
+| Cache miss | 9,035 ms | — |
+
+Cache speedup: **185x**.
+
+Two things this shows:
+
+**Retrieval mode no longer moves the needle.** Dense, hybrid, and hybrid+rerank
+land within noise of each other. Generation dominates end-to-end latency; the
+retrieval and reranking stages are now a rounding error against it. Before
+Phase 6 the same comparison spanned 47s to 117s.
+
+**Earlier absolute figures were measured on unanswerable questions.** The
+benchmark's original question list asked about BM25, RRF and semantic caching
+— none of which appear in the indexed corpus (the Attention and Llama 3
+papers). Retrieval returned near-misses and the model replied "I don't have
+enough information", which is cheap to generate. That produced a misleadingly
+fast ~3.9s figure. With answerable questions the model generates full grounded
+answers and p50 is ~8s.
+
+The Phase 6 before/after deltas are unaffected — both sides used the same
+question set — but ~8s p50 is the honest absolute number for real queries.
+
 ## Limitations
 
+- Latency n=5 per mode. The p95/p99 columns the benchmark prints are
+  arithmetic artifacts at that sample size (`sorted[int(5*0.95)]` is just the
+  maximum); n>=20 is needed before p95 means anything.
 - n=28 (v2) and n=30 (v1); single run per variant
 - Corpus is 2 papers / 2,094 chunks — small, and no HNSW index, so these
   numbers would not transfer to a 100k-chunk corpus unchanged
