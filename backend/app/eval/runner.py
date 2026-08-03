@@ -77,6 +77,11 @@ class EvalRunner:
             # snapshot so a run is reproducible from its own config.
             "reranker_backend": config.get("reranker_backend", settings.reranker_backend),
             "sparse_backend": config.get("sparse_backend", settings.sparse_backend),
+            # Generation overrides so a config sweep can be evaluated for
+            # quality, not just timed.
+            "model": config.get("model", settings.ollama_model),
+            "num_predict": config.get("num_predict", settings.generation_num_predict),
+            "max_chunk_chars": config.get("max_chunk_chars", settings.generation_max_chunk_chars),
             "use_llm_judge": self.use_llm_judge,
         }
 
@@ -207,7 +212,11 @@ class EvalRunner:
             # 2. Generate answer
             from app.generation.generator import Generator
 
-            generator = Generator()
+            generator = Generator(
+                model=config.get("model"),
+                num_predict=config.get("num_predict"),
+                max_chunk_chars=config.get("max_chunk_chars"),
+            )
             generation_start = time.time()
 
             context_text = "\n\n".join(

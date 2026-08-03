@@ -271,6 +271,72 @@ Retrieval is bit-identical, which is what recall@10 = 1.000 at this corpus size
 predicts: HNSW returns exactly what exact search returns. The only movement is
 answer_correctness, from generation nondeterminism.
 
+## Configuration sweep — latency vs quality
+
+Rather than guess which pipeline settings to run, 15 configurations were timed
+(`app/scripts/latency_sweep.py`) and the five most promising were then scored
+for quality on golden-v2. Raw data: `docs/latency-sweep-raw.csv`,
+`docs/config-sweep-results.csv`.
+
+TTFT is measured from the streaming endpoint. Answer length is recorded
+alongside latency because a configuration can look fast purely by emitting a
+shorter answer; ms/char separates throughput from verbosity.
+
+| Config | TTFT p50 | Total p50 | ms/char | NDCG@10 | ans_corr | Verdict |
+|---|---|---|---|---|---|---|
+| lean1b (1b, tk3, 400ch, np256) | 655 ms | **3,120 ms** | 2.95 | 0.9022 | 0.2405 | Pareto-optimal |
+| base1b (1b, tk5) | 901 ms | 3,833 ms | 2.56 | 0.9022 | 0.2323 | dominated by lean1b |
+| lean3b (3b, tk3, 400ch, np256) | 708 ms | 4,834 ms | 6.10 | 0.9022 | **0.2809** | Pareto-optimal |
+| baseline3b (3b, tk5) | 938 ms | 5,547 ms | 7.32 | 0.9022 | 0.2531 | **dominated by lean3b** |
+| norerank3b | **498 ms** | 5,843 ms | 7.16 | 0.7515 | 0.2521 | Pareto-optimal (TTFT only) |
+
+### The previous default was strictly worse than an available configuration
+
+`baseline3b` is dominated by `lean3b` on every axis — faster TTFT (938 -> 708),
+faster total (5,547 -> 4,834), higher answer correctness (0.2531 -> 0.2809),
+and identical retrieval metrics. No tradeoff, so the defaults were changed.
+
+Re-measured back-to-back on identical questions to confirm (absolute numbers
+drift ~20% between sessions, so only paired comparisons are trustworthy):
+
+| | TTFT p50 | Total p50 |
+|---|---|---|
+| old defaults (tk5, no truncation) | 1,078.9 ms | 7,520.1 ms |
+| new defaults (tk3 + 400 chars) | **874.6 ms** | **5,672.2 ms** |
+
+### Three results that contradicted the expectation
+
+**top_k=3 costs nothing.** NDCG@10, MRR, recall@10 and hit_rate are *identical*
+at top_k=3 and top_k=5. MRR is 0.89, so the answering chunk is almost always
+rank 1 — chunks 4 and 5 were pure prefill cost.
+
+**Prefill is not the TTFT bottleneck; retrieval is.** Truncating chunks to 400
+characters moved TTFT 938ms -> 942ms, i.e. not at all. Removing the reranker
+moved it 938ms -> 498ms. TTFT here is dominated by the ~500ms rerank stage,
+not by prompt size.
+
+**num_predict is not a lever.** The default cap is 2048 tokens but answers
+average ~190 tokens, so the cap never binds. Capping at 256 produced *more*
+text in one run and was slower. It was therefore left alone rather than
+applied as part of the new default.
+
+### Why the fastest TTFT was not chosen
+
+`norerank3b` has the best TTFT on the board (498ms) and is the wrong choice: it
+is the *slowest* overall (5,843ms) and drops NDCG@10 by 0.15. It wins only the
+metric people quote.
+
+This also reframes the earlier reranker A/B. No reranking at all scores 0.7515
+(plain RRF ordering), while the Ollama LLM reranker scored 0.184 — meaning that
+reranker was not merely slow, it was **worse than not reranking**. The fix was
+not a faster reranker but abandoning a decoder for a task it is bad at.
+
+### Caveat
+
+`answer_correctness` differences of +/-0.04 at n=28 are within noise. The
+identical retrieval metrics and the large gaps (0.9022 vs 0.7515) are the
+trustworthy signals here.
+
 ## Limitations
 
 - Latency n=5 per mode. The p95/p99 columns the benchmark prints are

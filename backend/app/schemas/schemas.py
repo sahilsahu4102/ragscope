@@ -96,7 +96,10 @@ class QueryRequest(BaseModel):
     """A user query to the RAG pipeline."""
 
     question: str = Field(..., min_length=1, max_length=5000)
-    top_k: int = Field(default=5, ge=1, le=50)
+    # 3, not 5: measured identical NDCG@10 / MRR / recall@10 / hit_rate at both
+    # (MRR is 0.89, so the answer chunk is almost always rank 1 and chunks 4-5
+    # were pure prefill cost) while TTFT dropped 938ms -> 743ms.
+    top_k: int = Field(default=3, ge=1, le=50)
     use_reranker: bool = True
     use_hybrid: bool = True
     stream: bool = False
@@ -107,6 +110,20 @@ class QueryRequest(BaseModel):
     use_cache: bool = Field(default=True, description="Check semantic cache before pipeline")
     filters: RetrievalFilters | None = Field(
         default=None, description="Metadata pre-filters for staged hybrid retrieval"
+    )
+
+    # ── Generation overrides (config sweeps / A-B) ────
+    # None = use the configured default. Exposed so a sweep can vary generation
+    # per request instead of restarting the app between configurations.
+    model: str | None = Field(default=None, description="Override the generation model")
+    num_predict: int | None = Field(
+        default=None, ge=1, le=8192, description="Override max generated tokens"
+    )
+    max_chunk_chars: int | None = Field(
+        default=None,
+        ge=0,
+        le=20000,
+        description="Truncate each chunk before it enters the prompt (0 = no limit)",
     )
 
 

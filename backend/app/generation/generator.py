@@ -39,15 +39,22 @@ GROUNDED_QA_PROMPT = """You are RAGScope, an AI assistant that answers questions
 Provide a well-structured answer with inline citations [1], [2], etc. At the end, list the sources used."""
 
 
-def format_context(chunks: list[dict]) -> str:
-    """Format retrieved chunks into numbered context for the prompt."""
+def format_context(chunks: list[dict], max_chunk_chars: int = 0) -> str:
+    """Format retrieved chunks into numbered context for the prompt.
+
+    max_chunk_chars > 0 truncates each chunk. Prefill size is what sets
+    time-to-first-token, so this is the main TTFT dial on the generation side.
+    """
     context_parts = []
     for i, chunk in enumerate(chunks, 1):
         source = chunk.get("document_name", "Unknown")
         page = chunk.get("metadata", {}).get("page_number", "?")
         score = chunk.get("dense_score", chunk.get("rrf_score", 0))
+        content = chunk["content"]
+        if max_chunk_chars and len(content) > max_chunk_chars:
+            content = content[:max_chunk_chars]
         context_parts.append(
-            f"[{i}] (Source: {source}, Page: {page}, Relevance: {score:.3f})\n{chunk['content']}"
+            f"[{i}] (Source: {source}, Page: {page}, Relevance: {score:.3f})\n{content}"
         )
     return "\n\n---\n\n".join(context_parts)
 
@@ -60,9 +67,22 @@ class Generator:
     tracked with OpenInference LLM spans (tokens, latency, cost).
     """
 
-    def __init__(self):
-        self.model = settings.ollama_model
+    def __init__(
+        self,
+        model: str | None = None,
+        num_predict: int | None = None,
+        max_chunk_chars: int | None = None,
+    ):
+        """Overrides exist so a config sweep can vary generation without
+        restarting the app or mutating global settings."""
+        self.model = model or settings.ollama_model
         self.base_url = settings.ollama_base_url
+        self.num_predict = (
+            num_predict if num_predict is not None else settings.generation_num_predict
+        )
+        self.max_chunk_chars = (
+            max_chunk_chars if max_chunk_chars is not None else settings.generation_max_chunk_chars
+        )
 
     async def generate(
         self,
@@ -74,7 +94,7 @@ class Generator:
 
         Returns: {"answer": str, "citations": list, "tokens": int, "latency_ms": float}
         """
-        context = format_context(chunks)
+        context = format_context(chunks, self.max_chunk_chars)
         prompt = GROUNDED_QA_PROMPT.format(context=context, question=question)
 
         start = time.perf_counter()
@@ -102,7 +122,7 @@ class Generator:
                     "options": {
                         "temperature": 0.3,
                         "top_p": 0.9,
-                        "num_predict": 2048,
+                        "num_predict": self.num_predict,
                     },
                 },
             )
@@ -158,7 +178,7 @@ class Generator:
 
         Yields JSON strings: {"token": "...", "done": false}
         """
-        context = format_context(chunks)
+        context = format_context(chunks, self.max_chunk_chars)
         prompt = GROUNDED_QA_PROMPT.format(context=context, question=question)
 
         from app.http_client import get_http_client
@@ -180,7 +200,7 @@ class Generator:
                     "options": {
                         "temperature": 0.3,
                         "top_p": 0.9,
-                        "num_predict": 2048,
+                        "num_predict": self.num_predict,
                     },
                 },
             ) as response,
