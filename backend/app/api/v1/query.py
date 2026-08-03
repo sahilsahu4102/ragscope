@@ -122,7 +122,11 @@ async def query_rag(
             )
 
         # ── 2. Generate ──────────────────────────
-        generator = Generator()
+        generator = Generator(
+            model=request.model,
+            num_predict=request.num_predict,
+            max_chunk_chars=request.max_chunk_chars,
+        )
         result = await generator.generate(
             question=safe_question,
             chunks=chunks,
@@ -303,7 +307,11 @@ async def query_rag_stream(
         )
 
     # ── 2. Stream generation ──────────────────
-    generator = Generator()
+    generator = Generator(
+        model=request.model,
+        num_predict=request.num_predict,
+        max_chunk_chars=request.max_chunk_chars,
+    )
 
     async def event_stream():
         async for token_json in generator.generate_stream(

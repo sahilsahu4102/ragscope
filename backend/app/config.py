@@ -108,6 +108,26 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ── Generation ────────────────────────────
+    generation_num_predict: int = Field(
+        default=2048,
+        ge=1,
+        description=(
+            "Max tokens generated per answer. Caps worst-case latency: generation "
+            "dominates end-to-end time, so this is the largest single lever."
+        ),
+    )
+    generation_max_chunk_chars: int = Field(
+        default=400,
+        ge=0,
+        description=(
+            "Truncate each retrieved chunk to this many characters before it "
+            "enters the prompt. 0 = no truncation. Measured (app/scripts/"
+            "latency_sweep.py): with top_k=3 this took total p50 from 5,032ms "
+            "to 4,840ms at unchanged retrieval metrics."
+        ),
+    )
+
     # ── Sparse retrieval ──────────────────────
     sparse_backend: str = Field(
         default="bm25",
