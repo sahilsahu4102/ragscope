@@ -108,6 +108,57 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ── Security / abuse control ──────────────
+    api_key: str = Field(
+        default="",
+        description=(
+            "When set, every non-health endpoint requires this value in the "
+            "X-API-Key header. Empty disables auth — fine locally, must be set "
+            "before exposing the service publicly."
+        ),
+    )
+    cors_origins: str = Field(
+        default="http://localhost:3000",
+        description="Comma-separated allowed origins. Never set to '*' with credentials enabled.",
+    )
+    trust_proxy_headers: bool = Field(
+        default=False,
+        description=(
+            "Trust X-Forwarded-For for client identity. Enable only behind a "
+            "proxy that overwrites it — otherwise callers can spoof the header "
+            "and reset their own rate limit."
+        ),
+    )
+    stream_pii_tail_chars: int = Field(
+        default=48,
+        ge=0,
+        description=(
+            "Characters held back when redacting a token stream. PII spans token "
+            "boundaries, so text is only released once no pattern could still "
+            "grow to cover it — which costs time-to-first-token, because the "
+            "client waits for this many characters before seeing anything. "
+            "Measured: 96 chars added ~1s to TTFT. 0 disables streaming "
+            "redaction (the persisted answer is still redacted). Must exceed "
+            "the longest PII pattern you care about: SSN 11, phone 14, IPv4 15, "
+            "card 19, email varies."
+        ),
+    )
+    rate_limit_enabled: bool = Field(default=True, description="Master switch for rate limiting")
+    rate_limit_query_per_min: int = Field(
+        default=20,
+        ge=1,
+        description="Query requests per minute per client (each costs an LLM call)",
+    )
+    rate_limit_heavy_per_hour: int = Field(
+        default=10,
+        ge=1,
+        description="Ingestion/eval/experiment requests per hour per client (whole-corpus work)",
+    )
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
     # ── Generation ────────────────────────────
     generation_num_predict: int = Field(
         default=2048,
