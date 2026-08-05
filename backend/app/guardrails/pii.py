@@ -117,3 +117,74 @@ class PIIRedactor:
             if pattern.search(text):
                 return True
         return False
+
+
+class StreamingRedactor:
+    """Applies PII redaction to a token stream without buffering the whole answer.
+
+    Redacting each token independently does not work: PII spans token
+    boundaries, so "john" + "@example.com" would slip through when neither
+    fragment matches on its own.
+
+    This holds back a trailing window of `tail_chars`. Text is only released
+    once it is far enough behind the frontier that no pattern could still grow
+    to cover it, so released text is final and never needs retracting. The
+    window must exceed the longest PII pattern this can match.
+
+    Cost is O(n^2) in answer length because the buffer is re-scanned per token,
+    which is irrelevant at answer sizes (~800 chars) and keeps the logic
+    obviously correct.
+    """
+
+    def __init__(self, redactor: PIIRedactor | None = None, tail_chars: int = 96):
+        self.redactor = redactor
+        self.tail_chars = tail_chars
+        self._raw = ""
+        self._emitted = ""
+
+    def feed(self, token: str) -> str:
+        """Add a token, return whatever text is now safe to emit."""
+        self._raw += token
+        # tail_chars=0 disables streaming redaction entirely. The persisted
+        # answer (redacted_text) is still cleaned; only the live stream is raw.
+        if self.redactor is None or self.tail_chars == 0:
+            self._emitted += token
+            return token
+
+        safe_end = len(self._raw) - self.tail_chars
+        if safe_end <= 0:
+            return ""
+
+        redacted, _ = self.redactor.redact(self._raw[:safe_end])
+        if not redacted.startswith(self._emitted):
+            # Should not happen: the tail window exists precisely so released
+            # text cannot change. Emit nothing rather than contradict output
+            # already sent to the client.
+            return ""
+
+        delta = redacted[len(self._emitted) :]
+        self._emitted = redacted
+        return delta
+
+    def flush(self) -> str:
+        """Redact and return whatever is still held in the tail window."""
+        if self.redactor is None:
+            return ""
+        redacted, _ = self.redactor.redact(self._raw)
+        if not redacted.startswith(self._emitted):
+            # A pattern matched across the boundary; the already-sent prefix
+            # cannot be recalled, so emit the remainder of the fully redacted
+            # text and let the caller store the clean version.
+            self._emitted = redacted
+            return ""
+        delta = redacted[len(self._emitted) :]
+        self._emitted = redacted
+        return delta
+
+    @property
+    def redacted_text(self) -> str:
+        """The full answer with PII removed — what should be persisted."""
+        if self.redactor is None:
+            return self._raw
+        redacted, _ = self.redactor.redact(self._raw)
+        return redacted

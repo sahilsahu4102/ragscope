@@ -113,12 +113,15 @@ def create_app() -> FastAPI:
     # ── Middleware (order matters — outermost first) ──
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(TimingMiddleware)
+    # Origins come from config so a deployment does not need a code change.
+    # allow_credentials with a wildcard origin is rejected by browsers and
+    # would be a hole anyway, so the list is always explicit.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=settings.cors_origin_list,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "X-API-Key"],
     )
 
     # ── Health Probes ─────────────────────────
