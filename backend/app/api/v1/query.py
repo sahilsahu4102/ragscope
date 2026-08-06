@@ -67,7 +67,10 @@ async def query_rag(
         "rag_query",
         "CHAIN",
         {
-            "query.text": request.question,
+            # The question is deliberately NOT set here. Spans are persisted to
+            # Postgres, so recording the raw text would store user PII
+            # unredacted and defeat the guardrail below. It is attached after
+            # redaction instead.
             "query.use_cache": request.use_cache,
             "query.query_transform": request.query_transform,
         },
@@ -85,6 +88,7 @@ async def query_rag(
             )
         # Use PII-redacted query for pipeline
         safe_question = input_check["redacted_query"]
+        otel_trace.get_current_span().set_attribute("query.text", safe_question)
 
         # ── 0b. Semantic cache check ──────────────
         if request.use_cache:
@@ -286,7 +290,7 @@ async def query_rag_stream(
         "rag_query_stream",
         "CHAIN",
         {
-            "query.text": request.question,
+            # Raw question omitted on purpose — see the non-streaming path.
             "query.use_cache": request.use_cache,
             "query.streaming": True,
         },
@@ -299,6 +303,7 @@ async def query_rag_stream(
         if input_check["blocked"]:
             raise HTTPException(status_code=400, detail=input_check["reason"])
         safe_question = input_check["redacted_query"]
+        otel_trace.get_current_span().set_attribute("query.text", safe_question)
 
         # ── 0b. Semantic cache check ─────────────
         if request.use_cache:

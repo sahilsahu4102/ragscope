@@ -4,6 +4,8 @@ RAGScope — Application Configuration
 Pydantic Settings with .env validation, organized by service domain.
 """
 
+from typing import ClassVar
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -27,10 +29,17 @@ class Settings(BaseSettings):
 
     # ── Database ──────────────────────────────
     postgres_user: str = "ragscope"
-    postgres_password: str = "changeme_in_production"
+    # Deliberately a dev-only sentinel rather than a plausible password: a
+    # deployment that forgets to set POSTGRES_PASSWORD fails the production
+    # startup check below instead of silently running on a known credential.
+    postgres_password: str = "dev-insecure-change-me"
     postgres_db: str = "ragscope"
     postgres_host: str = "postgres"
     postgres_port: int = 5432
+
+    # ClassVar, not a field: Pydantic treats a bare class attribute as an
+    # unannotated field and refuses to build the model.
+    INSECURE_DEFAULT_PASSWORD: ClassVar[str] = "dev-insecure-change-me"
 
     @property
     def database_url(self) -> str:
@@ -155,9 +164,52 @@ class Settings(BaseSettings):
         description="Ingestion/eval/experiment requests per hour per client (whole-corpus work)",
     )
 
+    expose_api_docs: bool = Field(
+        default=True,
+        description=(
+            "Serve /docs and /redoc. Enumerating every endpoint and schema is "
+            "free reconnaissance on a public deployment, so this defaults off "
+            "when app_env is 'production' regardless of this flag."
+        ),
+    )
+    max_upload_mb: int = Field(
+        default=50,
+        ge=1,
+        description=(
+            "Reject uploads above this size. Without a cap the whole file is "
+            "read into memory before it is written, so a large upload is an "
+            "out-of-memory vector."
+        ),
+    )
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.lower() in {"production", "prod"}
+
+    @property
+    def docs_enabled(self) -> bool:
+        return self.expose_api_docs and not self.is_production
+
+    def production_readiness_errors(self) -> list[str]:
+        """Configuration that is fine locally but unsafe when exposed.
+
+        Returned rather than raised so the caller decides whether to refuse to
+        start or merely warn — see main.lifespan.
+        """
+        problems: list[str] = []
+        if self.postgres_password == self.INSECURE_DEFAULT_PASSWORD:
+            problems.append("POSTGRES_PASSWORD is still the insecure default")
+        if not self.api_key:
+            problems.append("API_KEY is unset — every endpoint is open")
+        if "*" in self.cors_origin_list:
+            problems.append("CORS_ORIGINS contains '*' with credentials enabled")
+        if not self.rate_limit_enabled:
+            problems.append("RATE_LIMIT_ENABLED is false — no abuse protection")
+        return problems
 
     # ── Generation ────────────────────────────
     generation_num_predict: int = Field(

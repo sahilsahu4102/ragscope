@@ -75,6 +75,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         console_export=settings.trace_console_export,
         otlp_endpoint=settings.otlp_endpoint,
     )
+    # Refuse to start a production deployment on unsafe configuration. Warning
+    # and continuing would mean an open, unauthenticated LLM endpoint reachable
+    # from the internet — the failure this is meant to prevent.
+    problems = settings.production_readiness_errors()
+    if problems:
+        if settings.is_production:
+            for p in problems:
+                logger.error("Unsafe production configuration", problem=p)
+            raise RuntimeError("Refusing to start in production with: " + "; ".join(problems))
+        for p in problems:
+            logger.warning("Insecure for production (fine locally)", problem=p)
+
     await init_db()
 
     # Warm the reranker in the background so the first query doesn't pay the
@@ -106,8 +118,11 @@ def create_app() -> FastAPI:
         ),
         version="1.0.0",
         lifespan=lifespan,
-        docs_url="/docs",
-        redoc_url="/redoc",
+        # Off in production: /docs and /redoc enumerate every endpoint,
+        # parameter and schema, which is free reconnaissance for an attacker.
+        docs_url="/docs" if settings.docs_enabled else None,
+        redoc_url="/redoc" if settings.docs_enabled else None,
+        openapi_url="/openapi.json" if settings.docs_enabled else None,
     )
 
     # ── Middleware (order matters — outermost first) ──
@@ -132,11 +147,17 @@ def create_app() -> FastAPI:
 
     @app.get("/readyz", tags=["infra"])
     async def readyz():
-        """Readiness probe — can we serve traffic? Checks DB + Redis."""
+        """Readiness probe — can we serve traffic? Checks DB + Redis.
+
+        Dependency errors are logged, never returned. This endpoint is
+        unauthenticated by necessity (orchestrators probe it before any
+        credential is available), and a SQLAlchemy connection error can contain
+        the DSN — including the password. Callers get "error"; operators get the
+        detail from the logs.
+        """
         checks: dict = {}
         ok = True
 
-        # Check PostgreSQL
         try:
             from sqlalchemy import text
 
@@ -146,10 +167,11 @@ def create_app() -> FastAPI:
                 await session.execute(text("SELECT 1"))
             checks["postgres"] = "ok"
         except Exception as e:
-            checks["postgres"] = f"error: {e}"
+            logger = structlog.get_logger()
+            logger.error("Readiness check failed", dependency="postgres", error=str(e))
+            checks["postgres"] = "error"
             ok = False
 
-        # Check Redis
         try:
             import redis.asyncio as redis_mod
 
@@ -158,7 +180,9 @@ def create_app() -> FastAPI:
             await r.aclose()
             checks["redis"] = "ok"
         except Exception as e:
-            checks["redis"] = f"error: {e}"
+            logger = structlog.get_logger()
+            logger.error("Readiness check failed", dependency="redis", error=str(e))
+            checks["redis"] = "error"
             ok = False
 
         return {
