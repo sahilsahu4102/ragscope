@@ -1,0 +1,83 @@
+# Production overlay.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# The base compose file is a development setup: it bind-mounts the source tree,
+# runs uvicorn with --reload, and exposes Postgres and Redis on the host. Each
+# of those is wrong once the service is reachable from anywhere but localhost.
+#
+# Required environment (startup fails in production without them):
+#   POSTGRES_PASSWORD   real password, not the dev sentinel
+#   API_KEY             or every endpoint is open
+#   CORS_ORIGINS        the deployed frontend origin
+#   APP_ENV=production  enables the startup safety check and disables /docs
+
+services:
+  postgres:
+    # No host port. Only other compose services need to reach the database;
+    # publishing 5432 exposes it to the whole host network.
+    ports: []
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    restart: always
+
+  redis:
+    ports: []
+    restart: always
+    # Persistence matters here: Redis holds the semantic cache and the rate
+    # limit counters. Losing the counters on restart lets a client reset its
+    # own quota by waiting for a bounce.
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+
+  ollama:
+    ports: []
+    restart: always
+
+  backend:
+    restart: always
+    # No source bind-mount: the image is the artifact. Mounting the working
+    # tree over /app means the running code is whatever is on the host, which
+    # defeats the point of building an image.
+    volumes:
+      - upload_data:/app/uploads
+      - hf_cache:/home/ragscope/.cache/huggingface
+    environment:
+      APP_ENV: production
+      # Behind a load balancer that rewrites X-Forwarded-For. If the container
+      # is reachable directly, leave this false or clients can spoof the header
+      # to reset their rate limit.
+      TRUST_PROXY_HEADERS: "true"
+      LOG_LEVEL: INFO
+      # 1.0 persists a trace plus every span for every query, forever. At even
+      # modest traffic the spans table becomes the largest thing in the
+      # database. Sample instead, and prune on a schedule.
+      TRACE_SAMPLING_RATE: "0.1"
+    # No --reload. Workers stay at 1 by default because each one holds its own
+    # cross-encoder and BM25 index in memory — raise it only with the RAM to
+    # match, and measure before assuming more workers means more throughput.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  celery-worker:
+    restart: always
+    volumes:
+      - upload_data:/app/uploads
+    environment:
+      APP_ENV: production
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  frontend:
+    restart: always
+    build:
+      target: prod
+    command: npm run start

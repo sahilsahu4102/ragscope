@@ -55,18 +55,41 @@ async def ingest_document(
             detail=f"Unsupported file type: {content_type}. Allowed: {allowed_types}",
         )
 
-    # Generate IDs
+    # Generate IDs. The extension comes from our own UUID plus a suffix taken
+    # from the upload — Path().suffix strips any directory component, so a
+    # filename like "../../etc/passwd" cannot escape the upload directory.
     document_id = uuid.uuid4()
     file_ext = Path(file.filename or "document").suffix or ".pdf"
     save_path = _get_upload_dir() / f"{document_id}{file_ext}"
 
-    # Save uploaded file to disk
+    # Stream to disk in chunks with a hard cap. Reading the whole upload into
+    # memory first makes a large file an out-of-memory vector, and Content-Length
+    # cannot be trusted because a client can lie about it.
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    written = 0
     try:
         with open(save_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+            while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    f.close()
+                    save_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds the {settings.max_upload_mb} MB limit",
+                    )
+                f.write(chunk)
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+        save_path.unlink(missing_ok=True)
+        logger.error("Failed to save upload", document_id=str(document_id), error=str(e))
+        # Detail is not echoed: it can contain server filesystem paths.
+        raise HTTPException(status_code=500, detail="Failed to save file")
+
+    if written == 0:
+        save_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     # Create initial document record
     document = Document(
@@ -74,7 +97,7 @@ async def ingest_document(
         filename=file.filename or "document",
         mime_type=content_type,
         status="pending",
-        file_size_bytes=len(content),
+        file_size_bytes=written,
     )
     db.add(document)
     await db.commit()

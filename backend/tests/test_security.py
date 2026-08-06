@@ -224,3 +224,59 @@ async def test_api_key_required_when_configured(monkeypatch):
         with pytest.raises(HTTPException) as exc:
             await sec.require_api_key(bad)
         assert exc.value.status_code == 401
+
+
+# ── Production readiness gate ────────────────────
+
+
+def test_insecure_defaults_are_flagged(monkeypatch):
+    """The point of the gate: catch config that is fine locally and unsafe live."""
+    from app.config import Settings
+
+    s = Settings(
+        postgres_password=Settings.INSECURE_DEFAULT_PASSWORD,
+        api_key="",
+        cors_origins="*",
+        rate_limit_enabled=False,
+    )
+    problems = s.production_readiness_errors()
+    joined = " ".join(problems).lower()
+    assert "password" in joined
+    assert "api_key" in joined
+    assert "cors" in joined
+    assert "rate_limit" in joined
+
+
+def test_safe_config_passes_gate():
+    from app.config import Settings
+
+    s = Settings(
+        postgres_password="a-real-password",
+        api_key="a-real-key",
+        cors_origins="https://app.example.com",
+        rate_limit_enabled=True,
+    )
+    assert s.production_readiness_errors() == []
+
+
+def test_docs_disabled_in_production_even_if_flag_set():
+    """expose_api_docs must not be able to re-open /docs in production."""
+    from app.config import Settings
+
+    s = Settings(app_env="production", expose_api_docs=True)
+    assert s.is_production is True
+    assert s.docs_enabled is False
+
+
+def test_docs_enabled_in_development():
+    from app.config import Settings
+
+    assert Settings(app_env="development", expose_api_docs=True).docs_enabled is True
+    assert Settings(app_env="development", expose_api_docs=False).docs_enabled is False
+
+
+def test_cors_origins_parse_to_list():
+    from app.config import Settings
+
+    s = Settings(cors_origins="https://a.com, https://b.com ,")
+    assert s.cors_origin_list == ["https://a.com", "https://b.com"]

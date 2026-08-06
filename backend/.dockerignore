@@ -1,0 +1,38 @@
+# Build context exclusions.
+#
+# Without this, `COPY . .` pulled in ~112MB of .mypy_cache alone, plus every
+# other local cache, straight into the image layer.
+
+# Tool caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.coverage
+htmlcov/
+
+# Local environment and secrets — must never reach an image layer
+.env
+.env.*
+*.pem
+*.key
+
+# Runtime data: uploaded documents belong on a volume, not baked in
+uploads/
+
+# Local artifacts
+*.csv
+*.log
+*.db
+*.sqlite3
+
+# VCS / editor
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Tests are not needed at runtime. CI installs the source tree separately.
+tests/
