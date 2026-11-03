@@ -23,21 +23,25 @@ import structlog
 logger = structlog.get_logger()
 
 # ── PII Patterns ─────────────────────────────────
+# The phone patterns refuse to start right after a digit. Without that guard
+# phone_us matched the last 11 digits of an unspaced card number, so
+# "4111111111111111" came out as "41111[PHONE_REDACTED]": mislabelled, with the
+# card prefix left visible, and the credit_card pattern never saw it.
 _PII_PATTERNS: list[tuple[str, str, re.Pattern]] = [
     (
         "email",
         "[EMAIL_REDACTED]",
-        re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
+        re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
     ),
     (
         "phone_us",
         "[PHONE_REDACTED]",
-        re.compile(r"(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"),
+        re.compile(r"(?<!\d)(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"),
     ),
     (
         "phone_intl",
         "[PHONE_REDACTED]",
-        re.compile(r"\+\d{1,3}[-.\s]?\d{2,4}[-.\s]?\d{4,10}\b"),
+        re.compile(r"(?<!\d)\+\d{1,3}[-.\s]?\d{2,4}[-.\s]?\d{4,10}\b"),
     ),
     (
         "ssn",

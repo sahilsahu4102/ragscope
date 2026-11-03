@@ -21,13 +21,18 @@ logger = structlog.get_logger()
 
 # ── Injection Patterns ───────────────────────────
 # Each pattern has: (name, regex, weight 0.0-1.0)
+#
+# Word-based alternatives are anchored with \b. Without it, "DAN" matched inside
+# "guidance", "redundant" and "danger", and "act as" inside "impact as", so
+# ordinary questions about the indexed IPCC and Llama 3 documents were blocked
+# as jailbreaks at 0.90 confidence.
 _INJECTION_PATTERNS: list[tuple[str, re.Pattern, float]] = [
     # Direct instruction override
     (
         "ignore_instructions",
         re.compile(
-            r"(?:ignore|disregard|forget|override)\s+"
-            r"(?:all\s+)?(?:previous|prior|above|earlier|your)\s+"
+            r"\b(?:ignore|disregard|forget|override)\s+"
+            r"(?:all\s+)?(?:(?:previous|prior|above|earlier|your|the)\s+){1,2}"
             r"(?:instructions|prompts|rules|constraints|guidelines)",
             re.IGNORECASE,
         ),
@@ -37,31 +42,34 @@ _INJECTION_PATTERNS: list[tuple[str, re.Pattern, float]] = [
     (
         "role_impersonation",
         re.compile(
-            r"(?:you\s+are\s+now|act\s+as|pretend\s+(?:to\s+be|you\s+are)|"
-            r"new\s+instruction|system\s*:\s*|assistant\s*:\s*|"
+            r"(?:\byou\s+are\s+now\b|\bact\s+as\b|\bpretend\s+(?:to\s+be|you\s+are)\b|"
+            r"\bnew\s+instruction|\bsystem\s*:\s*|\bassistant\s*:\s*|"
             r"<\|?system\|?>|<<SYS>>)",
             re.IGNORECASE,
         ),
         0.85,
     ),
-    # Prompt leaking
+    # Prompt leaking. The optional second qualifier is what catches the most
+    # common phrasing, "reveal your system prompt".
     (
         "prompt_leak",
         re.compile(
-            r"(?:show|reveal|print|repeat|output|display)\s+"
+            r"\b(?:show|reveal|print|repeat|output|display)\s+(?:me\s+)?"
             r"(?:your|the|system|initial|original|hidden)\s+"
-            r"(?:prompt|instructions|rules|system\s+message)",
+            r"(?:(?:system|initial|original|hidden)\s+)?"
+            r"(?:prompt|instructions|rules|message)",
             re.IGNORECASE,
         ),
         0.80,
     ),
-    # Jailbreak patterns
+    # Jailbreak patterns. "DAN" stays case-sensitive so the name Dan is not a
+    # jailbreak.
     (
         "jailbreak",
         re.compile(
-            r"(?:DAN|do\s+anything\s+now|unrestricted\s+mode|"
+            r"\b(?:(?-i:DAN)|do\s+anything\s+now|unrestricted\s+mode|"
             r"no\s+restrictions|bypass\s+(?:safety|filter)|"
-            r"developer\s+mode|jailbreak)",
+            r"developer\s+mode|jailbreak\w*)\b",
             re.IGNORECASE,
         ),
         0.90,
@@ -80,21 +88,24 @@ _INJECTION_PATTERNS: list[tuple[str, re.Pattern, float]] = [
     (
         "encoding_trick",
         re.compile(
-            r"(?:base64|rot13|hex|decode|eval|exec)\s*[\(:]",
+            r"\b(?:base64|rot13|hex|decode|eval|exec)\s*[\(:]",
             re.IGNORECASE,
         ),
         0.70,
     ),
-    # Multi-shot injection ("Answer the above, then...")
+    # Multi-shot injection ("Answer the above, then..."). Phrases like "after
+    # that" and "but first" are common in honest questions, so this weighs in
+    # below the 0.5 threshold: it can only raise the score of a request that
+    # another pattern already flagged.
     (
         "multi_step",
         re.compile(
-            r"(?:after\s+(?:answering|that|this)|"
+            r"\b(?:after\s+(?:answering|that|this)|"
             r"then\s+(?:ignore|do|execute|run|forget)|"
-            r"but\s+(?:first|before\s+that))",
+            r"but\s+(?:first|before\s+that))\b",
             re.IGNORECASE,
         ),
-        0.60,
+        0.45,
     ),
 ]
 
