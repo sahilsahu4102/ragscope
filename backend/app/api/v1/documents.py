@@ -135,10 +135,12 @@ async def delete_document(
     except OSError as e:  # pragma: no cover — disk cleanup is best-effort
         logger.warning("Could not delete upload file", document_id=document_id, error=str(e))
 
-    # The BM25 index is built from all chunks, so it is now stale.
+    # The BM25 index and entity graph are built from all chunks, so both are now stale.
+    from app.retrieval.graph import invalidate_graph_cache
     from app.retrieval.sparse import invalidate_bm25_cache
 
     invalidate_bm25_cache()
+    invalidate_graph_cache()
 
     logger.info(
         "Document deleted",

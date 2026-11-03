@@ -63,7 +63,7 @@ def reciprocal_rank_fusion(
                     doc_data[doc_id] = doc.copy()
                 else:
                     # Merge scores from different retrievers
-                    for key in ("dense_score", "sparse_score"):
+                    for key in ("dense_score", "sparse_score", "graph_score"):
                         if key in doc and doc[key] is not None:
                             doc_data[doc_id][key] = doc[key]
 

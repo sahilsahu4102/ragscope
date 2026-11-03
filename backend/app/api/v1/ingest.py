@@ -108,10 +108,12 @@ async def ingest_document(
         document_id=str(document_id),
     )
 
-    # Invalidate BM25 cache so next hybrid query rebuilds with new docs
+    # Invalidate BM25 cache and entity graph so the next query rebuilds with new docs
+    from app.retrieval.graph import invalidate_graph_cache
     from app.retrieval.sparse import invalidate_bm25_cache
 
     invalidate_bm25_cache()
+    invalidate_graph_cache()
 
     logger.info(
         "Ingestion job dispatched",

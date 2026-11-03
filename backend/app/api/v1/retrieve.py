@@ -48,6 +48,7 @@ async def retrieve_debug(
         query_transform=request.query_transform,
         rrf_k=request.rrf_k,
         filters=request.filters.model_dump(exclude_none=True) if request.filters else None,
+        strategy=request.strategy,
     )
 
     latency_ms = (time.perf_counter() - start) * 1000
@@ -61,6 +62,7 @@ async def retrieve_debug(
             sparse_score=c.get("sparse_score"),
             rrf_score=c.get("rrf_score"),
             rerank_score=c.get("rerank_score"),
+            graph_score=c.get("graph_score"),
             element_type=c.get("element_type"),
             page_number=c.get("metadata", {}).get("page_number"),
         )

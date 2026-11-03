@@ -4,6 +4,8 @@ RAGScope — Pydantic Schemas
 Request/response models for all API endpoints.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 # ── Ingestion ─────────────────────────────────
@@ -107,6 +109,10 @@ class QueryRequest(BaseModel):
         default="none",
         description="Query transformation: none | rewrite | hyde | decompose",
     )
+    strategy: Literal["standard", "agentic", "graph"] = Field(
+        default="standard",
+        description="Retrieval strategy: standard | agentic (multi-hop) | graph (entity-graph arm)",
+    )
     use_cache: bool = Field(default=True, description="Check semantic cache before pipeline")
     filters: RetrievalFilters | None = Field(
         default=None, description="Metadata pre-filters for staged hybrid retrieval"
@@ -162,6 +168,7 @@ class ChunkScore(BaseModel):
     sparse_score: float | None = None
     rrf_score: float | None = None
     rerank_score: float | None = None
+    graph_score: float | None = None
     element_type: str | None = None
     page_number: int | None = None
 
@@ -174,6 +181,9 @@ class RetrieveRequest(BaseModel):
     use_reranker: bool = True
     use_hybrid: bool = True
     query_transform: str = Field(default="none", description="none | rewrite | hyde | decompose")
+    strategy: Literal["standard", "agentic", "graph"] = Field(
+        default="standard", description="standard | agentic | graph"
+    )
     rrf_k: int = Field(default=60, ge=10, le=200, description="RRF constant")
     filters: RetrievalFilters | None = Field(
         default=None, description="Metadata pre-filters for staged hybrid retrieval"
