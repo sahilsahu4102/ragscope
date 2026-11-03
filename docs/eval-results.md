@@ -337,6 +337,125 @@ not a faster reranker but abandoning a decoder for a task it is bad at.
 identical retrieval metrics and the large gaps (0.9022 vs 0.7515) are the
 trustworthy signals here.
 
+## Multi-hop and entity-graph retrieval (Phase 8)
+
+Every question in golden-v1 and golden-v2 is answered by one chunk. Phase 8
+added two strategies for questions that need two. Each is selected with
+`strategy` on `/query` and `/retrieve`, or `retrieval_strategy` in an
+experiment config.
+
+- **agentic**:
+  1. One LLM call splits the question into sub-questions.
+  2. Each sub-question runs the standard hybrid + rerank pipeline against
+     itself, concurrently.
+  3. The LLM sees the best evidence so far and either replies DONE or writes
+     one follow-up search.
+  4. The hops are merged.
+
+  `query_transform="decompose"` is the same without step 3. Before this
+  change, decompose kept the first sub-question and silently dropped the rest.
+- **graph**: adds a third arm to the RRF fusion, a personalized PageRank over
+  a chunk–entity graph. The graph has 5,869 chunks, 5,990 entities and 20,811
+  edges. It is built in-process without an LLM and cached like the BM25 index.
+
+### Measuring it: multihop-v1 and full_support@10
+
+`eval-datasets/multihop-v1.jsonl` holds 18 two-hop questions. A build check
+confirmed that every fact sits in exactly one chunk and that no chunk holds
+both halves of a question (see `eval-datasets/README.md`).
+
+**New metric.** `full_support@10` is 1 when both gold chunks are in the top 10.
+`recall@10` gives a question with one of its two facts found 0.5, which
+overstates an answer that needs both.
+
+**Corrected metric.** `recall@10` now counts the distinct gold contexts it
+matched. It used to count matching chunks, so a duplicate of one gold chunk
+could stand in for the other, and the corpus holds 187 groups of byte-identical
+chunks. The golden-v2 baseline did not move: recall@10 is 0.7679 under both
+definitions.
+
+### First design: RRF over the hops made ranking significantly worse
+
+Measured with the experiments API (paired bootstrap; the config is otherwise
+identical):
+
+| Dataset | Metric | standard | agentic v1 | p |
+|---|---|---|---|---|
+| multihop-v1 (n=18) | ndcg@10 | 0.663 | 0.553 | 0.034 |
+| multihop-v1 | full_support@10 | 0.556 | 0.444 | 0.216 |
+| golden-v2 (n=28) | ndcg@10 | 0.902 | **0.765** | <0.001 |
+| golden-v2 | mrr | 0.893 | **0.713** | <0.001 |
+
+On golden-v2, recall@10 and hit rate did not change. The right chunks were
+still retrieved; they were ranked lower.
+
+The per-question results showed why. RRF rewards agreement, and sub-questions
+about one topic agree on generic chunks. "Figure 1: The Transformer - model
+architecture" sat at rank 2 or 3 for several sub-questions. Three appearances at
+1/(60+2) beat the 1/(60+1) of the chunk that actually answered one
+sub-question, so the generic chunk took the top slot.
+
+### Second design: a merge that protects the original ranking
+
+The original question's top 2 chunks keep their places. Each other hop
+contributes only its single best chunk, in hop order. The rest of the original
+ranking fills the remaining slots. Nothing accumulates across hops, so a hub
+chunk cannot climb.
+
+This was measured with `app/scripts/retrieval_ab.py`. It runs retrieval only,
+with the same metric functions and the same paired bootstrap as the
+experiments API. Full experiments with generation ran the 16 GB development
+laptop out of memory. On the standard pipeline the script reproduces the
+experiments API's numbers exactly (multihop-v1 0.6630, golden-v2 0.9022).
+
+| Dataset | Metric | standard | agentic v2 | p |
+|---|---|---|---|---|
+| multihop-v1 (n=18) | ndcg@10 | 0.663 | 0.684 | 0.50 |
+| multihop-v1 | recall@10 | 0.667 | 0.722 | 0.27 |
+| multihop-v1 | full_support@10 | 0.556 (10/18) | 0.611 (11/18) | 0.72 |
+| golden-v2 (n=28) | ndcg@10 / mrr | 0.902 / 0.893 | 0.902 / 0.893 | 1.0 |
+| golden-v1 (n=30, held out) | ndcg@10 / mrr | 0.921 / 0.917 | 0.921 / 0.917 | 1.0 |
+
+**Ablation on multihop-v1** (decompose vs agentic): ndcg@10 is 0.698 vs 0.659
+(p = 0.21), and full_support@10 is 0.611 for both. The LLM follow-up step costs
+a call and a retrieval and adds nothing measurable here.
+
+**Graph arm** (experiments API):
+
+- golden-v2 is bit-identical to standard (ndcg@10 0.9022).
+- On multihop-v1, ndcg@10 goes from 0.663 to 0.669 (p = 0.074) and
+  full_support@10 is unchanged.
+
+The entity arm adds candidates, but the cross-encoder reorders the union back
+to the same top 10.
+
+**Latency** (retrieval only, median over the runs above, on a laptop short of
+memory, so the absolute numbers run high):
+
+| Strategy | Median retrieval |
+|---|---|
+| standard | 1.6–1.8 s |
+| decompose | 8.7 s |
+| agentic | 11.5–12.3 s |
+
+On a warm, unloaded machine the same question took 583 ms standard and
+6,571 ms agentic. Generation takes another ~5–8 s, so agentic roughly doubles
+end-to-end time.
+
+### What this shows and what it does not
+
+- The regression was real and its cause is documented. The merge removes it on
+  both single-hop sets, including golden-v1, which was not consulted while the
+  merge was designed.
+- The multi-hop gain is one question in 18 and not significant. The merge was
+  designed after inspecting failures on multihop-v1 and golden-v2, so if
+  anything that gain is optimistic. Other caveats:
+  - the questions were written with Claude Code
+  - each variant ran once
+  - decomposition runs at temperature 0.3 on a 3B model
+- Neither strategy is the default. Settling whether multi-hop retrieval helps
+  needs a larger multi-hop set and a stronger decomposition model than 3B.
+
 ## Limitations
 
 - Latency n=5 per mode. The p95/p99 columns the benchmark prints are

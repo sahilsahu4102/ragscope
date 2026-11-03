@@ -78,6 +78,46 @@ graph TB
 | **CI/CD** | GitHub Actions | Lint, format, tests; eval gate gated on a runner with model access |
 | **Deploy** | Docker Compose (dev) → GCP Cloud Run (prod) | Local-first, cloud-ready |
 
+## Evaluation
+
+Every retrieval change is scored against versioned golden sets in
+`eval-datasets/`:
+
+| Set | Questions | What it is |
+|---|---|---|
+| golden-v1 | 30 | LLM-generated |
+| golden-v2 | 28 | golden-v1 after hand review |
+| multihop-v1 | 18 | two-hop questions, each needing two distinct chunks |
+
+The metrics are NDCG@10, MRR, recall@10 and hit rate, plus `full_support@10`
+for multi-hop. Two configurations are compared on the same questions, and
+significance comes from a paired bootstrap over per-question scores (the
+`POST /experiments` endpoint, or `app/scripts/retrieval_ab.py` for
+retrieval-only runs). CI runs the test suite on every push and PR to main. PRs
+that touch retrieval, generation, ingestion or eval code also run the metric
+tests, and a full regression gate runs when a runner with model access is
+configured. Method, caveats and raw numbers are in
+[docs/eval-results.md](docs/eval-results.md).
+
+What the measurements overturned:
+
+- **LLM reranker vs cross-encoder.** Prompting an 8B LLM to score passages gave
+  NDCG@10 0.18. Plain RRF with no reranker scores 0.75, so the LLM reranker was
+  worse than nothing. A 22M cross-encoder scores 0.90 and runs 123x faster.
+- **BM25 → Postgres FTS.** FTS looked like the obvious upgrade. Measured at
+  every size from 5k to 100k rows, it was 2.2x slower, so the switch was reverted.
+- **Fastest-TTFT configuration.** Dropping the reranker gave the best
+  time-to-first-token but was the slowest end to end, and lost 0.15 NDCG.
+- **Agentic multi-hop retrieval, first design.** Fusing the sub-questions'
+  results with RRF dropped golden-v2 NDCG@10 from 0.90 to 0.76 (p<0.001).
+  Generic chunks that several sub-questions half-matched beat the chunks that
+  answered them. A merge that protects the original ranking removed the
+  regression on both single-hop sets, including the held-out golden-v1. On
+  multihop-v1 it fully supported 11 of 18 questions against 10, which is not
+  significant. It costs 7–11x retrieval latency, so it is not the default.
+- **Entity-graph retrieval.** It made no measurable difference. The
+  cross-encoder reorders its extra candidates back to the same top 10.
+
 ## Latency work
 
 Phase 5 optimised within the existing design. Phase 6 instrumented it first,
@@ -127,6 +167,21 @@ RAGScope includes three production-grade guardrails:
 | **Injection Detector** | Input | Heuristic pattern matching for 7 categories of prompt injection (role impersonation, ignore instructions, jailbreak, etc.) with confidence scoring. |
 | **Hallucination Detector** | Output | LLM-based groundedness scoring — verifies that every claim in the answer is supported by the retrieved context. |
 
+`tests/test_guardrails.py` runs real attack phrasings and ordinary questions
+about the indexed documents through all three. Run against the original
+patterns, 14 of its tests failed, from 12 distinct defects, since fixed:
+
+- **7 ordinary questions blocked.** "DAN" matched inside *guidance*,
+  *redundant*, *danger* and the name *Dan*. "act as" matched inside *impact as*.
+  And phrases like "after that" or "but first" cleared the threshold on their
+  own. So "What guidance does the IPCC give on adaptation?" was blocked as a
+  jailbreak at 0.90 confidence.
+- **3 misses.** "Ignore your previous instructions", "reveal your system
+  prompt" and "show me the hidden instructions" were not detected.
+- **2 PII leaks.** An unspaced card number was redacted as a phone number,
+  which left its prefix visible. Pipe-separated emails were also mangled,
+  because of a literal `|` in the TLD character class.
+
 All guardrails are configurable via environment variables:
 ```env
 ENABLE_PII_REDACTION=true
@@ -174,8 +229,6 @@ The reranker was the dominant cost — an 8B decoder prompted to emit relevance
 scores. Replacing it with a 22M cross-encoder was 123x faster on that stage
 *and* improved retrieval quality (NDCG@10 0.18 -> 0.90, p<0.001).
 
-> _Fill in by running the benchmark script against your deployment._
-
 ## Quickstart
 
 ```bash
@@ -222,7 +275,7 @@ ragscope/
 │   │   ├── http_client.py      # Shared httpx connection pool (Phase 5)
 │   │   ├── api/v1/             # Versioned endpoints
 │   │   ├── ingestion/          # Parse, chunk, embed
-│   │   ├── retrieval/          # Dense, BM25, RRF, rerank
+│   │   ├── retrieval/          # Dense, BM25, RRF, rerank, multi-hop, entity graph
 │   │   ├── generation/         # LLM, prompts, citations
 │   │   ├── eval/               # Metrics, LLM judge, datasets
 │   │   ├── observability/      # OTel, OpenInference, cost
@@ -246,6 +299,9 @@ ragscope/
 - [x] **Phase 3** — Eval Harness (metrics, LLM judge, CI gates)
 - [x] **Phase 4** — Observability & Experiments (traces, A/B, analytics)
 - [x] **Phase 5** — Latency Optimization, Guardrails, Benchmarking
+- [x] **Phase 6** — OpenTelemetry span attribution; cross-encoder reranker (117 s → ~8 s)
+- [x] **Phase 7** — HNSW scaling, semantic-cache rewrite, BM25 vs FTS (FTS rejected)
+- [x] **Phase 8** — Multi-hop (agentic) and entity-graph retrieval, multi-hop golden set, guardrail test suite (both strategies measured; neither is the default, see Evaluation)
 
 ## License
 
