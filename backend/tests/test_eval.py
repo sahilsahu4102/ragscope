@@ -79,9 +79,35 @@ def test_retrieval_metrics_compute_all():
         "ndcg@10",
         "precision@10",
         "recall@10",
+        "full_support@10",
     }
     assert expected_keys == set(metrics.keys())
     assert all(0.0 <= v <= 1.0 for v in metrics.values())
+
+
+def test_recall_counts_gold_facts_not_duplicate_chunks():
+    """Two copies of one gold chunk are one fact found, not two."""
+    from app.eval.metrics.retrieval_metrics import recall_at_k
+
+    fact_a = "Total net sales $ 383,285 $ 394,328 $ 365,817"
+    fact_b = "As of September 30, 2023, the Company had approximately 161,000 employees"
+    retrieved = [{"content": fact_a}, {"content": fact_a}]
+    assert recall_at_k(retrieved, [fact_a, fact_b], k=10) == 0.5
+
+
+def test_full_support_needs_every_gold_fact():
+    from app.eval.metrics.retrieval_metrics import full_support_at_k
+
+    hop1 = "The encoder is composed of a stack of N = 6 identical layers."
+    hop2 = "Llama 3 405B uses an architecture with 126 layers."
+    assert full_support_at_k([{"content": hop1}], [hop1, hop2]) == 0.0
+    assert full_support_at_k([{"content": hop2}, {"content": hop1}], [hop1, hop2]) == 1.0
+    assert (
+        full_support_at_k(
+            [{"content": hop1}] + [{"content": "x"}] * 10 + [{"content": hop2}], [hop1, hop2], k=10
+        )
+        == 0.0
+    )
 
 
 def test_generation_metrics_faithfulness_grounded():

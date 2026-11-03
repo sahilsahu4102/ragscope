@@ -170,17 +170,41 @@ def precision_at_k(
     return sum(labels) / k if k > 0 else 0.0
 
 
+def _gold_found(retrieved_chunks: list[dict], gold_contexts: list[str]) -> list[bool]:
+    """For each gold context, whether any retrieved chunk matches it."""
+    return [any(_compute_relevance_labels(retrieved_chunks, [gold])) for gold in gold_contexts]
+
+
 def recall_at_k(
     retrieved_chunks: list[dict],
     gold_contexts: list[str],
     k: int = 10,
 ) -> float:
-    """Recall@k: fraction of relevant docs found in top-k."""
+    """Recall@k: fraction of gold contexts matched by some top-k chunk.
+
+    Counts gold contexts, not matching chunks. The indexed corpus holds 187
+    groups of byte-identical chunks, and counting chunks let two copies of one
+    gold fact score like two different facts found.
+    """
     if not gold_contexts:
         return 1.0
-    labels = _compute_relevance_labels(retrieved_chunks[:k], gold_contexts)
-    total_relevant = len(gold_contexts)
-    return sum(labels) / total_relevant if total_relevant > 0 else 0.0
+    found = _gold_found(retrieved_chunks[:k], gold_contexts)
+    return sum(found) / len(gold_contexts)
+
+
+def full_support_at_k(
+    retrieved_chunks: list[dict],
+    gold_contexts: list[str],
+    k: int = 10,
+) -> float:
+    """1.0 when every gold context is matched in the top-k, else 0.0.
+
+    Recall@k gives a two-hop question with one of its two facts found 0.5. An
+    answer that needs both facts is not half right; this metric says so.
+    """
+    if not gold_contexts:
+        return 1.0
+    return 1.0 if all(_gold_found(retrieved_chunks[:k], gold_contexts)) else 0.0
 
 
 def compute_all_retrieval_metrics(
@@ -203,6 +227,7 @@ def compute_all_retrieval_metrics(
             f"ndcg@{k}": round(ndcg_at_k(retrieved_chunks, gold_contexts, k), 4),
             f"precision@{k}": round(precision_at_k(retrieved_chunks, gold_contexts, k), 4),
             f"recall@{k}": round(recall_at_k(retrieved_chunks, gold_contexts, k), 4),
+            f"full_support@{k}": full_support_at_k(retrieved_chunks, gold_contexts, k),
         }
 
         logger.info("Retrieval metrics computed", **metrics)
