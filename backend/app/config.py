@@ -222,21 +222,24 @@ class Settings(BaseSettings):
         ),
     )
     generation_num_predict: int = Field(
-        default=2048,
+        default=512,
         ge=1,
         description=(
             "Max tokens generated per answer. Caps worst-case latency: generation "
-            "dominates end-to-end time, so this is the largest single lever."
+            "dominates end-to-end time. The prompt asks for one to three sentences "
+            "(about 30-120 tokens), so 512 only cuts off runaway answers."
         ),
     )
     generation_max_chunk_chars: int = Field(
-        default=400,
+        default=0,
         ge=0,
         description=(
             "Truncate each retrieved chunk to this many characters before it "
             "enters the prompt. 0 = no truncation. Measured (app/scripts/"
             "latency_sweep.py): with top_k=3 this took total p50 from 5,032ms "
-            "to 4,840ms at unchanged retrieval metrics."
+            "to 4,840ms at unchanged retrieval metrics. Default 0 since 2026-11: "
+            "chunks run to ~510 characters, and at 400 the cut removed the answer "
+            "from 10 of 90 golden-v3 questions before the model saw it."
         ),
     )
 

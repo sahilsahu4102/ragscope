@@ -57,6 +57,11 @@ services:
       OLLAMA_KEEP_ALIVE: "-1"
       # Allow the embedder and generator to be loaded at the same time.
       OLLAMA_MAX_LOADED_MODELS: "2"
+      # 8-bit KV cache: half the f16 cache's VRAM. On a 4 GB GPU next to the
+      # embedder, the f16 cache left 3 of llama3.2:3b's 29 layers on the CPU
+      # ("20%/80% CPU/GPU" in `ollama ps`). Needs flash attention.
+      OLLAMA_FLASH_ATTENTION: "1"
+      OLLAMA_KV_CACHE_TYPE: "q8_0"
     volumes:
       - ollama_data:/root/.ollama
     deploy:

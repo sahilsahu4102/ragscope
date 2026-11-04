@@ -20,23 +20,24 @@ logger = structlog.get_logger()
 tracer = get_tracer("generation")
 
 
-GROUNDED_QA_PROMPT = """You are RAGScope, an AI assistant that answers questions strictly based on the provided context.
+# Until 2026-11 the prompt asked for "a well-structured answer" and a closing
+# list of sources. The 3B model wrote 150-300 tokens per answer, and output
+# length is most of the end-to-end time (docs/eval-results.md, Phase 9).
+GROUNDED_QA_PROMPT = """You are RAGScope. Answer the question using only the numbered context passages.
 
-## Rules
-1. Answer ONLY using information from the context below. Do not use prior knowledge.
-2. If the context doesn't contain enough information, say "I don't have enough information in the provided documents to answer this question."
-3. Cite your sources using [1], [2], etc. corresponding to the chunk numbers below.
-4. Be concise but thorough. Include all relevant details from the context.
-5. If multiple chunks support the same point, cite all of them.
-
-## Context (Retrieved Chunks)
+## Context
 {context}
 
 ## Question
 {question}
 
-## Instructions
-Provide a well-structured answer with inline citations [1], [2], etc. At the end, list the sources used."""
+## How to answer
+- Start with the direct answer, in one to three sentences. Answer every part of the question.
+- Use the exact numbers, names and units the context gives.
+- Cite the passage after each claim with its number, like [1] or [2][3].
+- If the context does not answer the question, reply only: "I don't have enough information in the provided documents to answer this question."
+- If it answers only part, give that part and say which part the documents do not cover.
+- No preamble and no list of sources."""
 
 
 def format_context(chunks: list[dict], max_chunk_chars: int = 0) -> str:
@@ -49,13 +50,11 @@ def format_context(chunks: list[dict], max_chunk_chars: int = 0) -> str:
     for i, chunk in enumerate(chunks, 1):
         source = chunk.get("document_name", "Unknown")
         page = chunk.get("metadata", {}).get("page_number", "?")
-        score = chunk.get("dense_score", chunk.get("rrf_score", 0))
         content = chunk["content"]
         if max_chunk_chars and len(content) > max_chunk_chars:
             content = content[:max_chunk_chars]
-        context_parts.append(
-            f"[{i}] (Source: {source}, Page: {page}, Relevance: {score:.3f})\n{content}"
-        )
+        # No retrieval score: it is noise to the model and costs prompt tokens.
+        context_parts.append(f"[{i}] (Source: {source}, Page: {page})\n{content}")
     return "\n\n---\n\n".join(context_parts)
 
 
