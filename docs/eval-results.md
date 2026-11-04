@@ -456,7 +456,162 @@ end-to-end time.
 - Neither strategy is the default. Settling whether multi-hop retrieval helps
   needs a larger multi-hop set and a stronger decomposition model than 3B.
 
+## Answers, latency and multi-hop (Phase 9)
+
+Phase 8 left four open problems: answer scores that looked poor (correctness
+~0.25, faithfulness ~0.24), ~8 s end to end, multi-hop questions that were
+answered from one of their two facts, and statistics built on n=5 latency runs
+and test sets of 18-30. Most of the first problem turned out to be the
+measurement, so the measurement was fixed first and a new baseline was taken
+before any system change.
+
+### What the old numbers were measuring
+
+| Defect | Effect |
+|---|---|
+| Faithfulness was token-set F1 between the answer and all 20 retrieved chunks joined | a grounded answer scored ~0.2, and "hallucination = 1 - faithfulness" reported ~80% for everything |
+| Tokens compared raw ("GPU." vs "GPU") | correctness and faithfulness understated |
+| The eval generated from all 20 retrieved chunks; `/query` sends 3 | answer scores and prompt sizes described a request production never makes |
+| The eval retrieved `top_k=20`, which reranks 80 candidates; `/query` (`top_k=3`) reranks 12 | retrieval took ~3 s in the eval and ~0.5 s in production, and the eval's top 3 came from a better ranking than production's |
+| `generation_max_chunk_chars=400` cut every chunk before the prompt | the answer was cut out of 10 of the 90 golden-v3 questions before the model saw it, to save ~190 ms |
+| Latency from 5 queries; no p95 | not enough data for a percentile |
+
+`app/scripts/answer_eval.py` now retrieves exactly as `/query` does, scores the
+answer against the context the model actually saw, and grades it three ways:
+
+- **Hosted judge** (`app/eval/answer_judge.py`, `gemini-3.5-flash-lite`, free
+  tier): correctness against the reference and faithfulness against the
+  context, as labels (correct/partial/incorrect, faithful/minor/unfaithful),
+  four answers per request. Its first rubric credited "the context does not
+  say" as correct when the context really lacked the answer. The rubric now
+  states that this is incorrect (faithfulness credits it), and every run below
+  was graded with the fixed rubric.
+- **Fact recall**, deterministic: each question lists the facts a correct
+  answer must state; `fact_recall_all` is 1 when the answer states all of them.
+  On the 288 graded test answers below, the judge's "correct" and this check
+  agree 94.8% of the time (89% under the old rubric).
+- **Latency** per question: retrieval, time to first token (retrieval plus
+  prompt processing) and total, as p50 and p95 with bootstrap 95% intervals.
+
+Every mean has a bootstrap 95% interval, and before/after pairs use the
+paired bootstrap from the experiments API.
+
+### New sets, split before any run
+
+`golden-v3` (28 dev, 62 test) and `multihop-v2` (16 dev, 34 test) were drafted
+by Gemini and kept only if code-level checks passed: each fact appears in its
+gold chunk and in no other chunk, no question contains its answer, and no
+single chunk answers a two-passage question. Construction and hand review are
+in `eval-datasets/README.md`. Prompts and retrieval were tuned on the dev sets
+only; each configuration below ran once on the test sets.
+
+### Before and after, held-out test sets
+
+"Before" is the production configuration at the start of this phase:
+verbose prompt, 400-character chunks, `llama3.2:3b` with 3 of its 29 layers on
+the CPU. "After" changes only what is listed in the next section.
+
+golden-v3-test (62 single-fact questions):
+
+| | judge correct | judge faithful | all facts stated | answer in top 3 | total p50 | total p95 |
+|---|---|---|---|---|---|---|
+| before | 0.79 [0.68, 0.89] | 0.92 [0.86, 0.98] | 0.79 | 0.90 | 6,400 ms | 11,676 ms |
+| after, standard | 0.86 [0.78, 0.94] | 0.86 [0.77, 0.94] | 0.85 | 0.90 | **1,664 ms** | **2,701 ms** |
+| after, agentic | **0.90** [0.83, 0.97] | 0.86 [0.78, 0.93] | **0.90** | 0.94 | 3,929 ms | 5,817 ms |
+
+multihop-v2-test (34 two-passage questions):
+
+| | judge correct | judge faithful | all facts stated | both passages in top 3 | total p50 | total p95 |
+|---|---|---|---|---|---|---|
+| before | 0.31 [0.22, 0.40] | 0.88 [0.78, 0.97] | 0.03 | 0.03 | 7,314 ms | 10,352 ms |
+| after, standard | 0.47 [0.41, 0.53] | 0.81 [0.66, 0.93] | 0.03 | 0.03 | 1,913 ms | 2,779 ms |
+| after, agentic | **0.88** [0.81, 0.94] | 0.93 [0.84, 0.99] | **0.74** | **0.79** | 5,394 ms | 7,424 ms |
+
+Paired against "before" (bootstrap p):
+
+- Standard: total time 6.8 s to 1.7 s mean on golden-v3-test (p<0.001),
+  7.1 s to 2.0 s on multihop-v2-test (p<0.001). Correctness +0.07 on
+  golden-v3-test (p=0.14, not significant), +0.16 on multihop-v2-test (p<0.001).
+- Agentic: correctness +0.11 on golden-v3-test (p=0.012) and +0.57 on
+  multihop-v2-test (p<0.001); both passages reach the model in 27 of 34
+  two-passage questions instead of 1 (p<0.001). It is still faster than the
+  old standard path, 4.1 s and 5.4 s mean.
+- Judge faithfulness: -0.07 standard (p=0.19), -0.06 agentic (p=0.20) on
+  golden-v3-test; neither is significant, and the cause is below.
+
+### What changed
+
+**Generation (latency and answers).**
+
+- The 3B model ran with 3 of 29 layers on the CPU: with the embedder loaded,
+  Ollama had 2.5 GiB of VRAM and the f16 KV cache for a 4,096-token context
+  needed about 450 MiB of it. `OLLAMA_KV_CACHE_TYPE=q8_0` (flash attention was
+  already on) halves the cache to 238 MiB, and `ollama ps` now shows
+  `100% GPU` with the context unchanged. The context stays at 4,096 because
+  seven code paths call the same model, and a per-request size would make
+  Ollama reload it whenever two of them alternate.
+- The prompt asked for "a well-structured answer" and a closing list of
+  sources, so answers ran 150-300 tokens. It now asks for the direct answer in
+  one to three sentences with inline citations: p50 output 152 to 42 tokens.
+- Chunks are no longer truncated (`generation_max_chunk_chars` 400 to 0), and
+  `generation_num_predict` is 512 instead of 2,048.
+- Retrieval itself was not changed. It got faster (p50 535 to 424 ms) once the
+  generator stopped running layers on the CPU, which the reranker shares.
+
+**Multi-hop (agentic and decompose strategies).**
+
+- `/query` defaults to `top_k=3`, and the merge kept the original question's
+  top 2 chunks first, so a two-part question had room for one hop's chunk and
+  the second fact never reached the model. The merge now protects one chunk.
+- The decomposition prompt asked for "2-4 sub-questions"; it now asks for one
+  search per fact. Its first version included a concrete example (BERT's
+  batch size), and llama3.2:3b returned that example verbatim as the
+  sub-questions for 4 of 10 dev questions. The example now uses placeholders,
+  and any sub-question that shares no content word with the question is
+  dropped.
+- A further rule ("split questions joined by *and*") made dev results worse
+  (both passages present 0.69 to 0.56) and was reverted.
+
+On multihop-v2-dev the decomposed hops found their own passage at rank 1 in
+almost every case where the model split the question. The remaining misses are
+questions it returned unsplit.
+
+### What this shows and what it does not
+
+- Most of the latency was the model running partly on the CPU and writing long
+  answers. Retrieval was ~0.5 s throughout; the 3 s in earlier eval runs came
+  from reranking 80 candidates that production never reranks.
+- Agentic retrieval now helps on held-out data, significantly, on both sets.
+  It adds ~2.3 s (one decomposition call, one follow-up call, three
+  retrievals), so it is opt-in (`strategy=agentic`); the default stays
+  `standard`.
+- **Faithfulness did not improve.** Reading the golden-v3-test answers the
+  judge marked unfaithful shows two patterns the concise prompt introduced:
+  the instruction "if it answers only part, say which part is missing" makes
+  the 3B model append a false "the exact figure is not specified" to complete
+  answers, and with no answer in the context it sometimes guesses where the
+  verbose prompt hedged. Because this was found on the test set, the prompt was
+  not changed afterwards: a fix has to be tuned on dev and confirmed on a
+  fresh test split.
+- The merge now protects one chunk instead of two. Phase 8 measured the
+  two-chunk merge on golden-v2 (no regression); the one-chunk merge has only
+  been measured on golden-v3, where agentic put the answer in the top 3 for
+  0.94 of test questions against 0.90 for standard.
+- Caveats: the questions were drafted by an LLM; the judge is a small hosted
+  model (checked against the deterministic fact recall, not against people);
+  each configuration ran once, and generation and decomposition run at
+  temperature 0.3; 62 and 34 questions give intervals of roughly ±0.1; one
+  machine (RTX 3050 Laptop, 4 GB VRAM).
+
+Per-question results, including the context each answer was generated from,
+are in `eval-datasets/results/` (`baseline-*`, `after-*`, `after-agentic-*`).
+
 ## Limitations
+
+The bullets below describe Phases 1-8. Phase 9 measures latency over 62 and 34
+questions per configuration, with p95 intervals, and grades answers with a
+hosted judge and a deterministic fact check.
+
 
 - Latency n=5 per mode. The p95/p99 columns the benchmark prints are
   arithmetic artifacts at that sample size (`sorted[int(5*0.95)]` is just the
@@ -478,6 +633,14 @@ curl -X POST localhost:8000/api/v1/datasets/generate \
 
 # Apply the hand review
 python backend/app/scripts/revise_golden.py
+
+# Phase 9: build and check the sets, then run and compare (inside the backend container)
+python -m app.scripts.build_golden single --n 100 --out /eval-datasets/golden-v3
+python -m app.scripts.build_golden multi --source /eval-datasets/golden-v3-test.jsonl --n 48 --out /eval-datasets/multihop-v2-test
+python -m app.scripts.build_golden check /eval-datasets/golden-v3-test.jsonl /eval-datasets/multihop-v2-test.jsonl
+python -m app.scripts.answer_eval run /eval-datasets/golden-v3-test.jsonl --label after --out /eval-datasets/results/after-golden-v3-test.jsonl
+python -m app.scripts.answer_eval run /eval-datasets/multihop-v2-test.jsonl --label agentic --strategy agentic --out /eval-datasets/results/after-agentic-multihop-v2-test.jsonl
+python -m app.scripts.answer_eval compare /eval-datasets/results/baseline-golden-v3-test.jsonl /eval-datasets/results/after-golden-v3-test.jsonl
 
 # Run the A/B
 curl -X POST localhost:8000/api/v1/experiments \

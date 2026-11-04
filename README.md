@@ -88,9 +88,15 @@ Every retrieval change is scored against versioned golden sets in
 | golden-v1 | 30 | LLM-generated |
 | golden-v2 | 28 | golden-v1 after hand review |
 | multihop-v1 | 18 | two-hop questions, each needing two distinct chunks |
+| golden-v3 | 28 dev + 62 test | single-fact questions; each fact verified to appear in exactly one chunk |
+| multihop-v2 | 16 dev + 34 test | two-passage questions built from golden-v3 facts |
 
-The metrics are NDCG@10, MRR, recall@10 and hit rate, plus `full_support@10`
-for multi-hop. Two configurations are compared on the same questions, and
+Retrieval is scored with NDCG@10, MRR, recall@10 and hit rate, plus
+`full_support@10` for multi-hop. Answers are scored end to end by
+`app/scripts/answer_eval.py`, which runs each question exactly as `/query` does
+and grades the answer with a hosted judge (correctness and faithfulness), a
+deterministic required-facts check, and per-question latency (p50/p95 with
+bootstrap intervals). Prompts and retrieval are tuned on the dev splits only. Two configurations are compared on the same questions, and
 significance comes from a paired bootstrap over per-question scores (the
 `POST /experiments` endpoint, or `app/scripts/retrieval_ab.py` for
 retrieval-only runs). CI runs the test suite on every push and PR to main. PRs
@@ -112,9 +118,26 @@ What the measurements overturned:
   results with RRF dropped golden-v2 NDCG@10 from 0.90 to 0.76 (p<0.001).
   Generic chunks that several sub-questions half-matched beat the chunks that
   answered them. A merge that protects the original ranking removed the
-  regression on both single-hop sets, including the held-out golden-v1. On
-  multihop-v1 it fully supported 11 of 18 questions against 10, which is not
-  significant. It costs 7–11x retrieval latency, so it is not the default.
+  regression on both single-hop sets, including the held-out golden-v1. It
+  still did not help multi-hop questions until Phase 9 (next bullets).
+- **Where the ~8 s went (Phase 9).** Retrieval was ~0.5 s. The 3B model ran 3
+  of its 29 layers on the CPU (an 8-bit KV cache fixed that on the 4 GB GPU),
+  and the prompt asked for long answers. End to end on 62 held-out questions:
+  p50 6.4 s to **1.7 s**, p95 11.7 s to **2.7 s**, with judged correctness
+  0.79 to 0.86 (not significant) and faithfulness 0.92 to 0.86 (not
+  significant; cause in [docs/eval-results.md](docs/eval-results.md)).
+- **Multi-hop, measured on held-out questions (Phase 9).** `/query` sends the
+  top 3 chunks, and the agentic merge kept the original question's top 2, so a
+  two-part question never had room for its second fact. With that fixed and a
+  decomposer that stopped echoing its own prompt example, both passages reach
+  the model in 27 of 34 two-passage questions instead of 1, and judged
+  correctness rises from 0.31 to **0.88** (p<0.001). It costs ~2.3 s, so it is
+  opt-in (`strategy=agentic`).
+- **The eval measured the wrong configuration.** It generated from 20 chunks
+  where `/query` sends 3, reranked 80 candidates where `/query` reranks 12, and
+  cut every chunk to 400 characters, which removed the answer from 10 of 90
+  questions. The first hosted-judge rubric also counted "the context does not
+  say" as a correct answer. All fixed before the Phase 9 baseline was taken.
 - **Entity-graph retrieval.** It made no measurable difference. The
   cross-encoder reorders its extra candidates back to the same top 10.
 
@@ -192,6 +215,22 @@ HALLUCINATION_THRESHOLD=0.7
 ```
 
 ## Benchmark Results
+
+End to end, the `/query` path (retrieve top 3, generate), over the 62
+golden-v3 test questions, one at a time, RTX 3050 Laptop (4 GB VRAM). 95%
+bootstrap intervals in brackets.
+
+| | p50 | p95 | output tokens (p50) |
+|---|---|---|---|
+| Before Phase 9 | 6,400 ms [5,738, 7,007] | 11,676 ms [9,850, 13,297] | 152 |
+| After, standard | **1,664 ms** [1,517, 1,808] | **2,701 ms** [2,247, 2,775] | 42 |
+| After, agentic | 3,929 ms [3,717, 4,286] | 5,817 ms [5,248, 6,572] | 48 |
+
+Retrieval is p50 424 ms of that; time to first token (retrieval plus prompt
+processing) is p50 604 ms.
+
+The Phase 6 numbers below were measured with the benchmark script on 5 queries
+per mode:
 
 > `python -m app.scripts.benchmark --queries 5 --skip-throughput`
 > Corpus: 5,869 chunks / 4 documents. Single RTX 3050 Laptop (4GB VRAM).
@@ -302,6 +341,7 @@ ragscope/
 - [x] **Phase 6** — OpenTelemetry span attribution; cross-encoder reranker (117 s → ~8 s)
 - [x] **Phase 7** — HNSW scaling, semantic-cache rewrite, BM25 vs FTS (FTS rejected)
 - [x] **Phase 8** — Multi-hop (agentic) and entity-graph retrieval, multi-hop golden set, guardrail test suite (both strategies measured; neither is the default, see Evaluation)
+- [x] **Phase 9** — End-to-end answer eval (hosted judge, fact recall, p50/p95), held-out golden-v3 and multihop-v2 sets, generator fully on GPU (p50 6.4 s → 1.7 s), agentic multi-hop fixed (judged correctness 0.31 → 0.88 on held-out two-passage questions)
 
 ## License
 
