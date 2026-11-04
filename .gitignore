@@ -54,3 +54,6 @@ dump.rdb
 
 # Local benchmark/test corpus (large public PDFs, re-downloadable)
 test_docs/
+
+# Public benchmark downloads (app/scripts/public_bench.py); results go to eval-datasets/results/public
+eval-datasets/public/
