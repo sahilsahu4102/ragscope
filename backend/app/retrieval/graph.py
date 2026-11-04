@@ -47,6 +47,14 @@ _STOPWORDS = frozenset(
     "it its we our they their table figure fig section appendix see".split()
 )
 MAX_ENTITY_DF = 0.05
+
+
+def _share(weight: np.ndarray, total: np.ndarray) -> np.ndarray:
+    """weight / total, with 0 where total is 0. In a corpus of one or two chunks an
+    entity can sit in every chunk: its idf is 0, and 0/0 put NaN into the walk."""
+    return np.divide(weight, total, out=np.zeros_like(weight), where=total > 0)
+
+
 RESTART = 0.5
 ITERATIONS = 20
 
@@ -108,8 +116,8 @@ class EntityGraph:
             idf=idf,
             edge_chunk=edge_chunk,
             edge_entity=edge_entity,
-            to_chunk=weight / entity_total[edge_entity] if pairs else weight,
-            to_entity=weight / chunk_total[edge_chunk] if pairs else weight,
+            to_chunk=_share(weight, entity_total[edge_entity]),
+            to_entity=_share(weight, chunk_total[edge_chunk]),
         )
 
     def query_entities(self, question: str) -> list[int]:
