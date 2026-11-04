@@ -212,6 +212,15 @@ class Settings(BaseSettings):
         return problems
 
     # ── Generation ────────────────────────────
+    generation_top_k: int = Field(
+        default=3,
+        ge=1,
+        description=(
+            "Chunks the generator sees, the same as /query's default top_k. The eval "
+            "runner used to pass all 20 retrieved chunks, so its answer scores and "
+            "latencies described a prompt production never sends."
+        ),
+    )
     generation_num_predict: int = Field(
         default=2048,
         ge=1,
@@ -264,6 +273,12 @@ class Settings(BaseSettings):
     eval_context_recall_threshold: float = 0.70
     eval_context_precision_threshold: float = 0.60
     eval_judge_model: str = ""  # Empty = use ollama_model
+    # Hosted judge for answer quality (app/eval/answer_judge.py). Grading with the
+    # 3B generator is the model marking its own homework. "gemini-*" models use
+    # GEMINI_API_KEY (Google's free tier works); any other model id goes through
+    # OpenRouter with OPENROUTER_API_KEY.
+    openrouter_api_key: str = ""
+    judge_model: str = "gemini-3.5-flash-lite"
 
     # ── Observability / Tracing ──────────────────
     trace_sampling_rate: float = Field(

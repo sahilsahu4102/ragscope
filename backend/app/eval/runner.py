@@ -83,6 +83,7 @@ class EvalRunner:
             "model": config.get("model", settings.ollama_model),
             "num_predict": config.get("num_predict", settings.generation_num_predict),
             "max_chunk_chars": config.get("max_chunk_chars", settings.generation_max_chunk_chars),
+            "generation_top_k": config.get("generation_top_k", settings.generation_top_k),
             "use_llm_judge": self.use_llm_judge,
         }
 
@@ -127,6 +128,7 @@ class EvalRunner:
                         gold_answer=sample.get("gold_answer"),
                         gold_contexts=sample.get("gold_contexts", []),
                         config=run_config,
+                        answer_facts=sample.get("answer_facts"),
                     )
 
                     if sample_result.get("retrieval_metrics"):
@@ -188,6 +190,7 @@ class EvalRunner:
         gold_answer: str | None,
         gold_contexts: list[str],
         config: dict,
+        answer_facts: list[list[str]] | None = None,
     ) -> dict:
         """Evaluate a single QA sample through the full pipeline."""
         with create_span(
@@ -221,20 +224,27 @@ class EvalRunner:
             )
             generation_start = time.time()
 
-            context_text = "\n\n".join(
-                f"[{i + 1}] {c['content']}" for i, c in enumerate(retrieved_chunks)
-            )
-            gen_result = await generator.generate(question, retrieved_chunks)
+            # Generate from what /query would send: the top generation_top_k
+            # chunks, not every chunk retrieved for the retrieval metrics.
+            context_chunks = retrieved_chunks[
+                : config.get("generation_top_k", settings.generation_top_k)
+            ]
+            seen = generator.seen_texts(context_chunks)
+            context_text = "\n\n".join(f"[{i + 1}] {text}" for i, text in enumerate(seen))
+            gen_result = await generator.generate(question, context_chunks)
             generated_answer = gen_result["answer"]
             generation_latency = round((time.time() - generation_start) * 1000, 2)
 
             # 3. Compute retrieval metrics
             retrieval_metrics = compute_all_retrieval_metrics(retrieved_chunks, gold_contexts, k=10)
 
-            # 4. Compute generation metrics (heuristic)
-            retrieved_texts = [c.get("content", "") for c in retrieved_chunks]
+            # 4. Compute generation metrics (heuristic), against the context the generator saw
             generation_metrics = compute_all_generation_metrics(
-                question, generated_answer, retrieved_texts, gold_answer
+                question,
+                generated_answer,
+                seen,
+                gold_answer,
+                answer_facts,
             )
 
             # 5. LLM Judge (if enabled)

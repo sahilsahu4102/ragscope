@@ -165,6 +165,7 @@ def test_generation_metrics_compute_all():
         "answer_relevance",
         "hallucination_score",
         "answer_correctness",
+        "abstained",
     }
     assert expected_keys == set(metrics.keys())
 

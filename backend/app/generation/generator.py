@@ -84,6 +84,10 @@ class Generator:
             max_chunk_chars if max_chunk_chars is not None else settings.generation_max_chunk_chars
         )
 
+    def seen_texts(self, chunks: list[dict]) -> list[str]:
+        """Chunk texts as the prompt carries them, after max_chunk_chars truncation."""
+        return [c["content"][: self.max_chunk_chars or None] for c in chunks]
+
     async def generate(
         self,
         question: str,
@@ -166,6 +170,11 @@ class Generator:
                 data.get("eval_count", 0),
             ),
             "latency_ms": round(latency_ms, 1),
+            # Ollama's own timings (ns -> ms): prefill sets time to first token,
+            # decode is output length / generation speed.
+            "prefill_ms": round(data.get("prompt_eval_duration", 0) / 1e6, 1),
+            "decode_ms": round(data.get("eval_duration", 0) / 1e6, 1),
+            "output_tokens": data.get("eval_count", 0),
         }
 
     async def generate_stream(
