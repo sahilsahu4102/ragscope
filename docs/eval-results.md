@@ -606,6 +606,101 @@ questions it returned unsplit.
 Per-question results, including the context each answer was generated from,
 are in `eval-datasets/results/` (`baseline-*`, `after-*`, `after-agentic-*`).
 
+## Public benchmarks (NanoBEIR, MultiHop-RAG)
+
+The golden sets above are small and come from RAGScope's own corpus, so on
+2026-11-04 the production retrieval pipeline was also run, unchanged (same
+models, same settings), on two public benchmarks with published results:
+`app/scripts/public_bench.py`. Each benchmark has its own `bench_*` database,
+and the script refuses any other, so no public data reaches the main corpus.
+
+### NanoBEIR: single-hop retrieval, NDCG@10
+
+NanoBEIR is a 50-query subset of each BEIR dataset (binary relevance). With 50
+queries the 95% intervals are about +/-0.1 (production on NanoNQ: 0.708,
+[0.605, 0.804]).
+
+| Mode | NanoNFCorpus | NanoMSMARCO | NanoNQ |
+|---|---|---|---|
+| BM25 (rank-bm25) | 0.253 | 0.429 | 0.341 |
+| BM25, published | 0.325 | 0.541 | 0.501 |
+| Dense (nomic-embed-text) | 0.321 | 0.557 | 0.659 |
+| Hybrid (RRF) | 0.316 | 0.569 | 0.546 |
+| **Hybrid + cross-encoder, 40 candidates (production)** | **0.322** | **0.663** | **0.708** |
+| Hybrid + cross-encoder, 100 candidates | 0.336 | 0.663 | 0.725 |
+| Same cross-encoder, published | 0.393 | 0.669 | 0.760 |
+
+The published rows come from sentence-transformers' `CrossEncoderNanoBEIREvaluator`,
+as reported on the model card of a fine-tune of
+`cross-encoder/ms-marco-MiniLM-L6-v2`
+([ayushexel/reranker-ms-marco-MiniLM-L6-v2-gooaq-bce](https://huggingface.co/ayushexel/reranker-ms-marco-MiniLM-L6-v2-gooaq-bce)):
+the cross-encoder row is its pre-training evaluation (epoch -1, the base
+model), and the BM25 row is the evaluator's BM25 baseline, derived from the
+deltas the card prints. That evaluator reranks BM25's top 100 and, with
+`always_rerank_positives`, adds every relevant document BM25 missed, so it is
+an upper bound for a pipeline that has to find its own candidates.
+
+- **The reranked pipeline is close to the reference.** On NanoMSMARCO it is
+  within 0.006. On NanoNQ and NanoNFCorpus it is 0.035 and 0.057 below at 100
+  candidates, inside the intervals and in the direction the added positives
+  predict.
+- **BM25 is the weak part.** It is 0.07-0.16 below the reference BM25 on all
+  three. `SparseRetriever` tokenizes with `lower().split()`
+  (`app/retrieval/sparse.py`, lines 191 and 237), so punctuation stays attached
+  to words (a query word followed by "?" never matches) and there is no
+  stemming or stopword removal. On NanoNQ, hybrid (0.546) scores below dense
+  alone (0.659). The intervals overlap at 50 queries, but the direction matches
+  a weak BM25 dragging the fusion down. A tokenizer fix is next, validated on
+  the dev splits before it changes any default.
+- **100 candidates instead of 40** adds 0.000-0.017 and roughly doubles
+  reranking time (NanoMSMARCO p50 1.1 s to 2.1 s), so production stays at 40.
+
+### MultiHop-RAG: multi-hop retrieval over news
+
+MultiHop-RAG ([Tang and Yang, 2024](https://arxiv.org/abs/2401.15391)) has 609
+news articles and 2,556 queries that each need evidence from 2-4 articles; the
+2,255 non-null queries are scored. Articles are split into ~256-token sentence
+windows (190 words, 60-word overlap), each prefixed with the article's title,
+source and date, and scored with the logic of the benchmark's
+`retrieval_evaluate.py` (a chunk is relevant when an evidence sentence, with
+spaces and newlines removed, is a substring of it). "All evidence" is
+RAGScope's `full_support@10`: every evidence sentence in the top 10.
+
+| Run | Queries | MRR@10 | Hits@10 | Hits@4 | All evidence | p50 |
+|---|---|---|---|---|---|---|
+| Dense (nomic-embed-text) | 2,255 | 0.451 | 0.776 | 0.592 | 0.131 | 0.06 s |
+| Best published, no reranker (bge-large-en-v1.5) | | 0.430 | 0.672 | 0.522 | | |
+| **Production (hybrid + MiniLM cross-encoder)** | 2,255 | **0.543** | **0.835** | **0.682** | 0.148 | 2.4 s |
+| Best published, reranked (voyage-02 + bge-reranker-large) | | 0.586 | 0.747 | 0.663 | | |
+| Production, first 250 queries | 250 | 0.541 | 0.832 | 0.668 | 0.184 | 2.3 s |
+| Agentic, first 250 queries | 250 | 0.569 | 0.860 | 0.704 | 0.272 | 10.2 s |
+
+Published rows are Table 5 of the paper. Full-set intervals are about +/-0.02
+(production MRR@10 [0.526, 0.560]); on 250 queries about +/-0.05.
+
+- **Dense retrieval alone beats every published unreranked row** on all three
+  metrics. **Production beats the best published reranked row on Hits@10
+  (+0.09) and Hits@4 (+0.02) and is 0.04 lower on MRR@10**, with a 22M
+  cross-encoder where the paper uses bge-reranker-large (560M).
+- **Agentic retrieval** (first 250 queries only, because it costs ~10 s a
+  query): MRR@10 +0.03 and Hits@10 +0.03, both inside the intervals, and every
+  evidence sentence in the top 10 for 27% of queries instead of 18%, at 4.4x
+  the latency. [Ammann et al., 2025](https://arxiv.org/abs/2507.00355) report a
+  larger gain from decomposition on the same benchmark (MRR@10 0.464 to 0.635,
+  +16.7 s a query) from a lower baseline.
+- The first 250 queries are in dataset order, not a random sample. Production
+  on them is within 0.015 of the full set on every metric, so they are
+  representative at least for that mode.
+- **MAP@10 is not compared.** RAGScope gets 0.21-0.30 against the paper's
+  0.31-0.48, while MRR@10 is similar. The paper's MAP is higher relative to its
+  MRR than the released script produces on these runs, so how it was computed
+  could not be reproduced. The values are in the result files.
+- Same queries, corpus and scoring script, but not the same chunker or
+  hardware: the paper's pipeline used LlamaIndex, and these runs used one
+  RTX 3050 Laptop (4 GB VRAM).
+
+Per-mode results with intervals are in `eval-datasets/results/public/`.
+
 ## Limitations
 
 The bullets below describe Phases 1-8. Phase 9 measures latency over 62 and 34
@@ -641,6 +736,13 @@ python -m app.scripts.build_golden check /eval-datasets/golden-v3-test.jsonl /ev
 python -m app.scripts.answer_eval run /eval-datasets/golden-v3-test.jsonl --label after --out /eval-datasets/results/after-golden-v3-test.jsonl
 python -m app.scripts.answer_eval run /eval-datasets/multihop-v2-test.jsonl --label agentic --strategy agentic --out /eval-datasets/results/after-agentic-multihop-v2-test.jsonl
 python -m app.scripts.answer_eval compare /eval-datasets/results/baseline-golden-v3-test.jsonl /eval-datasets/results/after-golden-v3-test.jsonl
+
+# Public benchmarks (each in its own bench_* database; data is downloaded and cached on first run)
+docker compose exec postgres createdb -U ragscope bench_nanonq
+docker compose run --rm -e POSTGRES_DB=bench_nanonq backend python -m app.scripts.public_bench nanobeir NanoNQ
+docker compose exec postgres createdb -U ragscope bench_multihoprag
+docker compose run --rm -e POSTGRES_DB=bench_multihoprag backend python -m app.scripts.public_bench multihop-rag --modes dense production
+docker compose run --rm -e POSTGRES_DB=bench_multihoprag backend python -m app.scripts.public_bench multihop-rag --limit 250 --modes agentic
 
 # Run the A/B
 curl -X POST localhost:8000/api/v1/experiments \

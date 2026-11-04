@@ -141,6 +141,20 @@ What the measurements overturned:
 - **Entity-graph retrieval.** It made no measurable difference. The
   cross-encoder reorders its extra candidates back to the same top 10.
 
+**Public benchmarks.** The same pipeline, unchanged, on public data with
+published results (`app/scripts/public_bench.py`; method and caveats in
+[docs/eval-results.md](docs/eval-results.md#public-benchmarks-nanobeir-multihop-rag)):
+
+| Benchmark | Metric | RAGScope (production) | Published reference |
+|---|---|---|---|
+| NanoMSMARCO (50 queries) | NDCG@10 | 0.663 | 0.669, same cross-encoder on BM25 top 100 plus missed positives |
+| NanoNQ (50 queries) | NDCG@10 | 0.708 | 0.760, same |
+| NanoNFCorpus (50 queries) | NDCG@10 | 0.322 | 0.393, same |
+| MultiHop-RAG (2,255 queries) | Hits@10 / Hits@4 / MRR@10 | 0.835 / 0.682 / 0.543 | 0.747 / 0.663 / 0.586, best in the paper (voyage-02 + bge-reranker-large, 560M) |
+
+The weak part is BM25: it splits on whitespace only, and scores 0.07-0.16
+NDCG@10 below the reference BM25 on all three NanoBEIR sets.
+
 ## Latency work
 
 Phase 5 optimised within the existing design. Phase 6 instrumented it first,
