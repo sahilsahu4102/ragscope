@@ -58,9 +58,12 @@ Otherwise reply with ONE short search query for the missing information and noth
 _EVIDENCE_PER_HOP = 2
 _EVIDENCE_CHARS = 300
 
-# The original question's best chunks are not displaced. Its MRR on the
-# single-hop golden set is 0.89, so the answer is almost always in the top 2.
-PROTECTED = 2
+# The original question's best chunk is not displaced (MRR 0.89 on the
+# single-hop golden set: the answer is usually first). It was 2 until 2026-11,
+# but /query generates from top_k=3 chunks, so a two-part question kept only
+# one hop's chunk and the second fact never reached the model.
+# ponytail: a question with three or more parts needs top_k >= parts + 1.
+PROTECTED = 1
 
 
 class _Transformer(Protocol):

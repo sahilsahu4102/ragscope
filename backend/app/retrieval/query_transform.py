@@ -7,6 +7,8 @@ Pre-retrieval query optimization:
   3. Decomposition — break complex multi-hop questions into sub-queries
 """
 
+import re
+
 import structlog
 
 from app.config import settings
@@ -15,6 +17,17 @@ from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
 tracer = get_tracer("retrieval")
+
+
+_FILLER = frozenset(
+    "what which when where does were with have that this from much many used uses "
+    "than they their there about into also".split()
+)
+
+
+def _terms(text: str) -> set[str]:
+    """Words of four or more letters, minus question filler."""
+    return set(re.findall(r"[a-z0-9]{4,}", text.lower())) - _FILLER
 
 
 class QueryTransformer:
@@ -119,16 +132,22 @@ class QueryTransformer:
                 "transform.type": "decompose",
             },
         ):
+            # One lookup per fact asked for. The old prompt asked for "2-4"
+            # sub-questions, so a two-part question often came back as three or
+            # four overlapping ones, and the merge only has room for one chunk
+            # per hop. The example uses placeholders: given a concrete example
+            # (BERT's batch size), llama3.2:3b returned it verbatim for 4 of 10
+            # multi-hop dev questions.
             prompt = (
-                "You are a research assistant. Break the following complex question "
-                "into 2-4 simpler sub-questions that, when answered individually, "
-                "would provide a complete answer.\n\n"
-                "Rules:\n"
-                "- Each sub-question should be self-contained\n"
-                "- Number each sub-question\n"
-                "- Output ONLY the numbered sub-questions\n\n"
-                f"Complex question: {query}\n\n"
-                "Sub-questions:"
+                "Split the question into the separate searches needed to answer it: "
+                "one short, self-contained question per fact it asks for. A question "
+                "that asks for one fact needs one search.\n\n"
+                "Example:\n"
+                "Question: What is the X of A, and what is the Y of B?\n"
+                "1. What is the X of A?\n"
+                "2. What is the Y of B?\n\n"
+                f"Question: {query}\n"
+                "Output only the numbered searches."
             )
             result = await self._llm_call(prompt)
 
@@ -142,8 +161,9 @@ class QueryTransformer:
                     if cleaned:
                         sub_queries.append(cleaned)
 
-            if not sub_queries:
-                sub_queries = [query]
+            # A sub-question sharing no content word with the question is the
+            # model drifting (or echoing the example); retrieving it adds noise.
+            sub_queries = [q for q in sub_queries if _terms(q) & _terms(query)] or [query]
 
             logger.info(
                 "Query decomposed",

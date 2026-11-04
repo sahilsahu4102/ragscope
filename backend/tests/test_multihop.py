@@ -6,6 +6,8 @@ which queries get retrieved, when the follow-up loop stops, and that every
 hop's best chunk survives fusion.
 """
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from app.retrieval.fusion import reciprocal_rank_fusion
@@ -81,12 +83,12 @@ def test_merge_keeps_the_originals_best_then_one_chunk_per_hop():
         [
             _ranked("q1", "q2", "q3", "q4"),
             _ranked("hop_a", "x"),
-            _ranked("q2", "y"),  # its best chunk is already placed: adds nothing
+            _ranked("q1", "y"),  # its best chunk is already placed: adds nothing
             _ranked("hop_c"),
         ],
         top_k=6,
     )
-    assert [c["chunk_id"] for c in merged] == ["q1", "q2", "hop_a", "hop_c", "q3", "q4"]
+    assert [c["chunk_id"] for c in merged] == ["q1", "hop_a", "hop_c", "q2", "q3", "q4"]
 
 
 def test_a_generic_chunk_shared_by_every_hop_does_not_take_the_top():
@@ -94,11 +96,12 @@ def test_a_generic_chunk_shared_by_every_hop_does_not_take_the_top():
     ranked = [_ranked("answer", "q2"), *[_ranked(f"hop{i}_best", "hub") for i in range(3)]]
     assert reciprocal_rank_fusion(ranked)[0]["chunk_id"] == "hub"
     merged = [c["chunk_id"] for c in merge_hops(ranked, top_k=5)]
-    assert merged == ["answer", "q2", "hop0_best", "hop1_best", "hop2_best"]
+    assert merged == ["answer", "hop0_best", "hop1_best", "hop2_best", "q2"]
 
 
 @pytest.mark.asyncio
-async def test_each_hops_best_chunk_reaches_the_top_k():
+async def test_each_hops_best_chunk_reaches_querys_default_top_3():
+    """With 2 protected chunks, /query's top_k=3 had room for only one hop."""
     index = FakeIndex(
         {
             "Compare the layer counts": ["generic", "noise1", "noise2"],
@@ -109,8 +112,8 @@ async def test_each_hops_best_chunk_reaches_the_top_k():
     retriever = MultiHopRetriever(
         index, FakeTransformer(["Transformer layers?", "Llama 3 405B layers?"]), max_followups=0
     )
-    top4 = [c["chunk_id"] for c in await retriever.retrieve("Compare the layer counts", top_k=4)]
-    assert top4 == ["generic", "noise1", "transformer_6_layers", "llama_126_layers"]
+    top3 = [c["chunk_id"] for c in await retriever.retrieve("Compare the layer counts", top_k=3)]
+    assert top3 == ["generic", "transformer_6_layers", "llama_126_layers"]
 
 
 @pytest.mark.asyncio
@@ -179,3 +182,18 @@ async def test_decompose_and_agentic_route_through_multihop(monkeypatch):
     assert await pipeline.retrieve("q", query_transform="decompose") == [{"chunk_id": "x"}]
     await pipeline.retrieve("q", strategy="agentic")
     assert calls == [0, AGENTIC_MAX_FOLLOWUPS]
+
+
+@pytest.mark.asyncio
+async def test_decompose_drops_sub_questions_unrelated_to_the_question(monkeypatch):
+    """llama3.2:3b echoed the prompt's example ("BERT's batch size") for 4 of 10 dev questions."""
+    from app.retrieval.query_transform import QueryTransformer
+
+    transformer = QueryTransformer()
+    reply = "1. What batch size was BERT trained with?\n2. How many layers does Llama 3 405B have?"
+    monkeypatch.setattr(transformer, "_llm_call", AsyncMock(return_value=reply))
+    question = "How many layers does the Transformer encoder have, and how many does Llama 3 405B?"
+    assert await transformer.decompose(question) == ["How many layers does Llama 3 405B have?"]
+
+    monkeypatch.setattr(transformer, "_llm_call", AsyncMock(return_value="1. What is BERT?"))
+    assert await transformer.decompose(question) == [question]
