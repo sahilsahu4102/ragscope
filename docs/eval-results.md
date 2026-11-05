@@ -629,6 +629,10 @@ every required fact (`context_full_support` = 1). Generation runs at temperature
 | Test: answers that flag a fact missing from their context | 5, 4 of 12 | 4, 4 of 12 | |
 | Test: judged correctness / faithfulness (88 graded in both runs) | 0.898 / 0.886 | 0.892 / 0.903 | 0.87 / 0.54 |
 | Test: p50 end to end; output tokens | 2.29 s, 2.33 s; 52, 54 | 2.07 s, 2.13 s; 48, 46 | |
+| Fresh test (golden-v4-test, multihop-v3-test; 67): false tails | 6, 6 | 1, 0 | 0.003 |
+| Fresh test: required facts in the answer | 0.908, 0.908 | 0.898, 0.908 | 0.79 |
+| Fresh test: answers that flag a fact missing from their context | 2, 2 of 7 | 2, 3 of 7 | |
+| Fresh test: p50 end to end; output tokens | 1.99 s, 2.00 s; 47, 46 | 1.84 s, 1.91 s; 44, 42 | |
 
 - The change was chosen on dev. A scoped rewording ("name the parts it does
   not give; never mention details the question did not ask for") was tried
@@ -639,18 +643,23 @@ every required fact (`context_full_support` = 1). Generation runs at temperature
 - Judged faithfulness rose on golden-v3-test (0.879 to 0.931, n = 58) and fell
   on multihop-v2-test (0.900 to 0.850, n = 30). Neither part nor the whole is
   significant, so this is not a faithfulness gain.
-- This is not the fresh test split the section above asked for. golden-v3-test
-  and multihop-v2-test were also used for Phase 9, where this problem was
-  found, and for the public-benchmark rerun. A fresh split could not be drafted
-  because the Gemini free tier returned 503 (high demand) for most of
-  2026-11-05, so a fresh-split confirmation is still to do.
+- golden-v3-test and multihop-v2-test had been used before, including in
+  Phase 9 where this problem was found, so the change was also run once on a
+  **fresh split** built for it: golden-v4-test (45) and multihop-v3-test (22).
+  The Gemini free tier returned 503 (high demand) for most of 2026-11-05, so
+  these questions were written with Claude Code from passages sampled at
+  random under `build_golden.py`'s pool rules, excluding every passage an
+  earlier set uses, and kept only if `build_golden.py check` passes (see
+  `eval-datasets/README.md`). The fresh-split p-value pairs per-question means
+  over both runs. These runs were not judged: Gemini was still unavailable.
 - Under both prompts the 3B model sometimes invents a figure when a fact is
   missing from its context (a warmup-step count, a RoPE base). That, not the
   tails, is the remaining faithfulness problem.
 
-Runs: `eval-datasets/results/dev/prompt-{old,new,scoped}-{1,2}.jsonl` and
+Runs: `eval-datasets/results/dev/prompt-{old,new,scoped}-{1,2}.jsonl`,
 `eval-datasets/results/prompt-{old,new}-{1,2}-test.jsonl` (the first test run
-of each prompt carries the judge's grades).
+of each prompt carries the judge's grades) and
+`eval-datasets/results/prompt-{old,new}-{1,2}-fresh.jsonl`.
 
 ## Public benchmarks (NanoBEIR, MultiHop-RAG)
 

@@ -127,8 +127,8 @@ What the measurements overturned:
   0.79 to 0.86 (not significant) and faithfulness 0.92 to 0.86 (not
   significant; cause in [docs/eval-results.md](docs/eval-results.md)). Dropping
   the prompt rule behind it (2026-11-05) cut false "not specified" endings from
-  11-12 to 0-1 of 96 held-out answers with the same facts; judged faithfulness
-  did not change significantly.
+  11-12 to 0-1 of 96 held-out answers, and from 6 to 0-1 of 67 on a fresh
+  split, with the same facts; judged faithfulness did not change significantly.
 - **Multi-hop, measured on held-out questions (Phase 9).** `/query` sends the
   top 3 chunks, and the agentic merge kept the original question's top 2, so a
   two-part question never had room for its second fact. With that fixed and a

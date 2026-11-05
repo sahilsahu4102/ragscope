@@ -15,6 +15,8 @@ experiments.
 | `golden-v3-dev.jsonl` | 28 | drafted by Gemini, kept only if code-level fairness checks pass, then hand-reviewed (`app/scripts/build_golden.py`) | single-hop dev set: tuning only |
 | `golden-v3-test.jsonl` | 62 | same build, other passages | single-hop test set: reported, never tuned on |
 | `multihop-v2-test.jsonl` | 34 | two-passage questions joined from golden-v3-test facts, same checks, hand-curated | multi-hop test set: reported, never tuned on |
+| `golden-v4-test.jsonl` | 45 | written with Claude Code (2026-11-05) from passages sampled at random under `build_golden.py`'s pool rules (seed 2026), excluding every passage an earlier set uses; kept only if `build_golden.py check` passes (71 drafted, 26 failed, mostly a fact also stated elsewhere) | fresh single-hop test set, first used for the prompt change in docs/eval-results.md |
+| `multihop-v3-test.jsonl` | 22 | pairs of golden-v4-test facts from two passages, written with Claude Code, same checks | fresh multi-hop test set, same first use |
 
 Corpus: the four PDFs in `test_docs/` (5,869 chunks).
 
