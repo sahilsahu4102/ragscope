@@ -27,6 +27,7 @@ Phase 6 (latency):
 """
 
 import asyncio
+import os
 import re
 from abc import ABC, abstractmethod
 from typing import Any
@@ -192,10 +193,13 @@ class CrossEncoderReranker(BaseReranker):
     module-level cache and scored on a worker thread.
     """
 
-    # Truncate passages before scoring. Cross-encoder cost is roughly linear in
-    # sequence length, and relevance is almost always decidable from the first
-    # couple hundred tokens — so this is the main latency dial on this stage.
-    MAX_PASSAGE_CHARS = 800
+    # Passages are scored whole; the model's tokenizer cuts at its own 512-token
+    # limit. Until 2026-11 they were cut to 800 characters first, on the theory
+    # that relevance shows in the opening lines. Public benchmarks disproved it:
+    # the cut hid the end of 93% of NanoNFCorpus documents and 96% of
+    # MultiHop-RAG chunks, and the gap to published numbers grew with document
+    # length (docs/eval-results.md). RAGScope's own chunks are at most 511
+    # characters, so the cut never applied to them.
 
     def __init__(self, model_name_str: str | None = None):
         self._model_name = model_name_str or settings.reranker_model
@@ -238,6 +242,13 @@ class CrossEncoderReranker(BaseReranker):
                 )
                 return None
 
+            # torch starts one thread per physical core it detects: 2 of the 4
+            # CPUs Docker gives the backend here. All 4 score 40 MultiHop-RAG
+            # chunks in 1.7 s instead of 2.5 s.
+            # ponytail: assumes one worker process; with several, split the CPUs.
+            import torch
+
+            torch.set_num_threads(os.cpu_count() or 1)
             _model_cache[self._model_name] = model
             logger.info("Cross-encoder loaded and cached", model=self._model_name)
             return model
@@ -269,7 +280,7 @@ class CrossEncoderReranker(BaseReranker):
                 fallback = OllamaReranker()
                 return await fallback.rerank(query, chunks, top_k)
 
-            pairs = [(query, chunk["content"][: self.MAX_PASSAGE_CHARS]) for chunk in chunks]
+            pairs = [(query, chunk["content"]) for chunk in chunks]
 
             # predict() is synchronous CPU work — run it off the event loop so it
             # doesn't stall every other in-flight request.
