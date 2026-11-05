@@ -24,6 +24,11 @@ Phase 6 (latency):
       so a per-instance cache meant reloading the checkpoint from disk every query.
     - predict() is CPU-bound and synchronous; it now runs in a thread so it does
       not block the event loop for every other in-flight request.
+
+2026-11: the default is now cross-encoder/ettin-reranker-32m-v1 (33M params),
+chosen on the dev splits of the public benchmarks: at production depth it took
+MultiHop-RAG MRR@10 from 0.528 to 0.667, for +0.7 s per 40 chunks on 4 CPUs
+(docs/eval-results.md).
 """
 
 import asyncio
@@ -188,13 +193,15 @@ class CrossEncoderReranker(BaseReranker):
     """
     Cross-encoder reranker using sentence-transformers.
 
-    Default checkpoint is ms-marco-MiniLM-L-6-v2 (22M params), which scores
-    ~20 query-document pairs in 30-60ms on CPU. The model is held in a
-    module-level cache and scored on a worker thread.
+    Default checkpoint is ettin-reranker-32m-v1 (33M params), which scores 40
+    news chunks in ~2.9 s on 4 CPUs. The model is held in a module-level cache
+    and scored on a worker thread.
     """
 
-    # Passages are scored whole; the model's tokenizer cuts at its own 512-token
-    # limit. Until 2026-11 they were cut to 800 characters first, on the theory
+    # Passages are scored whole up to 512 tokens: MiniLM's own limit, and the
+    # length ettin (which takes 8k) was chosen at. Uncapped, ettin scored no
+    # better on the long-document dev sets and ran 1.5x slower.
+    # Until 2026-11 passages were cut to 800 characters first, on the theory
     # that relevance shows in the opening lines. Public benchmarks disproved it:
     # the cut hid the end of 93% of NanoNFCorpus documents and 96% of
     # MultiHop-RAG chunks, and the gap to published numbers grew with document
@@ -233,7 +240,7 @@ class CrossEncoderReranker(BaseReranker):
 
             try:
                 # ty models to_thread as taking only the callable; it is variadic.
-                model = await asyncio.to_thread(CrossEncoder, self._model_name)  # ty: ignore[too-many-positional-arguments]
+                model = await asyncio.to_thread(CrossEncoder, self._model_name, max_length=512)  # ty: ignore[too-many-positional-arguments]
             except Exception as e:
                 logger.warning(
                     "Cross-encoder load failed, falling back to Ollama reranker",

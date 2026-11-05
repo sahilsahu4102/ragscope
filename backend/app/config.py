@@ -263,11 +263,13 @@ class Settings(BaseSettings):
         description="'cross_encoder' (fast, local ONNX-able) or 'ollama' (LLM-scored, slow)",
     )
     reranker_model: str = Field(
-        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        default="cross-encoder/ettin-reranker-32m-v1",
         description=(
-            "Cross-encoder checkpoint. MiniLM-L-6 is 22M params (~30-60ms for 20 pairs "
-            "on CPU). BAAI/bge-reranker-v2-m3 is 568M and ~50x slower — higher quality "
-            "but far outside a real-time latency budget."
+            "Cross-encoder checkpoint. ettin-reranker-32m-v1 is 33M params (~2.9 s for "
+            "40 news chunks on 4 CPUs). It replaced ms-marco-MiniLM-L-6-v2 (22M, ~2.1 s) "
+            "in 2026-11: MultiHop-RAG MRR@10 0.528 -> 0.667 on the dev split "
+            "(docs/eval-results.md). ettin-reranker-68m-v1 scores a little higher but "
+            "takes ~9 s."
         ),
     )
 
