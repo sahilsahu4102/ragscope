@@ -155,14 +155,16 @@ were chosen on dev splits; protocol, ablations and caveats in
 | Benchmark | Metric | Before | After | Best published |
 |---|---|---|---|---|
 | MultiHop-RAG (2,255 queries) | MRR@10 / MAP@10 / Hits@10 / Hits@4 | 0.543 / 0.251 / 0.835 / 0.682 | **0.731 / 0.378 / 0.936 / 0.841** | 0.635 / 0.322 / 0.872 / 0.763 ([Ammann et al., 2025](https://arxiv.org/abs/2507.00355): bge-reranker-large, 560M, plus LLM query decomposition) |
-| NanoMSMARCO (50 queries) | NDCG@10 | 0.663 | **0.707** | 0.669 (MiniLM reranking BM25's top 100 plus every missed relevant document) |
-| NanoNQ (50 queries) | NDCG@10 | 0.708 | **0.767** | 0.760 (same) |
+| NanoMSMARCO (50 queries) | NDCG@10 | 0.663 | 0.707 | 0.669 (MiniLM reranking BM25's top 100 plus every missed relevant document) |
+| NanoNQ (50 queries) | NDCG@10 | 0.708 | 0.767 | 0.760 (same) |
 | NanoNFCorpus (50 queries) | NDCG@10 | 0.322 | 0.337 | 0.393 (same; ~50 relevant documents per query, all handed to the reranker) |
 
 MultiHop-RAG's "after" is single-pass, with no LLM call before the answer, and
 its 95% intervals clear every published value. It costs 3.8 s a query on 4 CPUs
 (2.4 s before); on RAGScope's own corpus, with its shorter chunks, end-to-end
-p50 did not change (1.66 s to 1.67 s). NanoNFCorpus is the one miss.
+p50 did not change (1.66 s to 1.67 s). On the 50-query NanoBEIR sets the
+gains over the published numbers are within noise (NanoMSMARCO p = 0.14,
+NanoNQ p = 0.71), and NanoNFCorpus is below them (p = 0.04).
 The published protocol gives the reranker every relevant document, which
 matters most where queries have dozens, and on that medical set the old
 reranker with the two fixes scored higher (0.357).

@@ -723,17 +723,21 @@ document it missed, on document text without titles.
   decimals. With the old 800-character cut it loses 0.013 and 0.024 on the two
   sets with long documents and nothing on NanoMSMARCO, whose passages are short.
   The cut, not the wiring, caused the 2026-11-04 gap.
-- **Production now beats the published reranker numbers on NanoMSMARCO
-  (+0.038) and NanoNQ (+0.007)** without being handed the relevant documents,
-  and after the tokenizer fix BM25 beats the published BM25 on NanoNFCorpus and
-  NanoNQ (it is still below it on NanoMSMARCO, 0.485 against 0.541). Against
-  before: production +0.016 / +0.044 / +0.059 (p = 0.54 / 0.11 / 0.032), BM25
+- **Production scores above the published reranker numbers on NanoMSMARCO
+  (+0.038) and NanoNQ (+0.007) without being handed the relevant documents,
+  but on 50 queries neither gap is significant:** paired by query with the
+  reproduced MiniLM rows, p = 0.14 (95% interval -0.016 to +0.091) and
+  p = 0.71 (-0.026 to +0.042). After the tokenizer fix BM25 is above the
+  published BM25 on NanoNFCorpus (+0.022, p = 0.076) and NanoNQ (+0.029,
+  p = 0.26) and below it on NanoMSMARCO (0.485 against 0.541, p = 0.046),
+  paired with the evaluator's own BM25 lists. Against before: production
+  +0.016 / +0.044 / +0.059 (p = 0.54 / 0.11 / 0.032), BM25
   +0.094 / +0.056 / +0.189 (p < 0.001 / 0.28 / < 0.001).
-- **NanoNFCorpus stays below the published row** (0.337 against 0.393). Its
-  queries have 50 relevant documents on average (median 23.5) against about one
-  for the other two, so a protocol that adds every one of them to the candidates
-  gains most there, and ettin is weaker than MiniLM on this medical set
-  (0.380 against 0.393 on the same protocol). On this set the fixes with MiniLM
+- **NanoNFCorpus stays below the published row** (0.337 against 0.393,
+  p = 0.04). Its queries have 50 relevant documents on average (median 23.5)
+  against about one for the other two, so a protocol that adds every one of
+  them to the candidates gains most there; on that protocol ettin is no better
+  than MiniLM on this medical set (0.380 against 0.393, p = 0.60). On this set the fixes with MiniLM
   (0.357) score above the shipped reranker (p = 0.34), and hybrid alone scores
   0.365.
 - On NanoNQ the fixes give +0.037 and the reranker +0.023 more; on NanoNFCorpus
@@ -782,9 +786,10 @@ over 250 queries on A100 GPUs). Full-set intervals are about +/-0.02
   (p < 0.001 for both). The before side is a rerun of the 2026-11-04 code:
   production matched that run exactly; agentic, which samples its
   sub-questions, gave MRR@10 0.563.
-- **BM25 alone**, after the tokenizer fix, comes within 0.01 of Ammann et al.'s
-  best on MRR@10, MAP@10 and Hits@4, beats it on Hits@10, and beats every other
-  published row. MultiHop-RAG's questions name the outlets, people and
+- **BM25 alone**, after the tokenizer fix, is level with Ammann et al.'s best:
+  within 0.01 on MRR@10, MAP@10 and Hits@4 and 0.014 above on Hits@10, each
+  published value inside BM25's 95% interval (Hits@10's at its lower edge,
+  [0.872, 0.899]). It beats every other published row. MultiHop-RAG's questions name the outlets, people and
   products their evidence mentions, which is what lexical matching is for.
 - **Agentic retrieval** (first 250 queries) adds MAP@10 +0.018 and all-evidence
   +0.052 over production on the same queries (p < 0.001 for both), not MRR@10
