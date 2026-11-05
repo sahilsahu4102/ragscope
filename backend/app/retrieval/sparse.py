@@ -35,13 +35,21 @@ stall after ingestion, and correctness across multiple workers.
 Neither is good at 100k (189ms and 423ms both dominate the retrieval budget).
 The real fix at that scale is a purpose-built lexical index — pg_search /
 ParadeDB, or an external engine — not tuning either of these.
+
+Tokens (2026-11). BM25 used to split on whitespace, so "broccoli?" never
+matched "broccoli", "funding" never matched "fund", and "the" counted as a
+term. On public benchmarks that put it 0.07-0.16 NDCG@10 below a standard BM25
+and pulled hybrid below dense-only on NanoNQ. It now indexes the same Postgres
+'english' lexemes as content_tsv (punctuation split off, stopwords dropped,
+Snowball stemming), so both backends analyse text identically and no stemmer
+dependency is needed. The latency table above predates this change.
 """
 
 from __future__ import annotations
 
 import structlog
 from rank_bm25 import BM25Okapi
-from sqlalchemy import select, text
+from sqlalchemy import literal_column, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -50,6 +58,11 @@ from app.observability.tracer import create_span, get_tracer
 
 logger = structlog.get_logger()
 tracer = get_tracer("retrieval")
+
+# A tsvector's lexemes as a token list, each repeated once per position so BM25
+# still sees term frequency.
+_LEXEMES = "array(SELECT u.lexeme FROM unnest({}) u, generate_series(1, cardinality(u.positions)))"
+_QUERY_LEXEMES = text("SELECT " + _LEXEMES.format("to_tsvector('english', :query)"))
 
 # ── Module-level BM25 index cache ──────────────
 _cached_index: BM25Okapi | None = None
@@ -165,6 +178,7 @@ class SparseRetriever:
                 Chunk.metadata_,
                 Chunk.document_id,
                 Document.filename,
+                literal_column(_LEXEMES.format("chunks.content_tsv")).label("tokens"),
             ).join(Document, Chunk.document_id == Document.id)
         )
         rows = result.fetchall()
@@ -188,7 +202,7 @@ class SparseRetriever:
                     "metadata": row.metadata_ or {},
                 }
             )
-            tokenized_corpus.append(row.content.lower().split())
+            tokenized_corpus.append(row.tokens or [])
 
         index = BM25Okapi(tokenized_corpus)
 
@@ -234,7 +248,9 @@ class SparseRetriever:
             if not chunks or index is None:
                 return []
 
-            tokenized_query = query.lower().split()
+            tokenized_query = (
+                await self.db.execute(_QUERY_LEXEMES, {"query": query})
+            ).scalar() or []
             scores = index.get_scores(tokenized_query)
 
             scored_chunks = [
