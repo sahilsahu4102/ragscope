@@ -160,7 +160,9 @@ were chosen on dev splits; protocol, ablations and caveats in
 | NanoNFCorpus (50 queries) | NDCG@10 | 0.322 | 0.337 | 0.393 (same; ~50 relevant documents per query, all handed to the reranker) |
 
 MultiHop-RAG's "after" is single-pass, with no LLM call before the answer, and
-its 95% intervals clear every published value. It costs 3.8 s a query on 4 CPUs
+its 95% intervals clear every published value, also on the 2,005 queries left
+once the 250 the changes were chosen on are removed (MRR@10 0.738). It costs
+3.8 s a query on 4 CPUs
 (2.4 s before); on RAGScope's own corpus, with its shorter chunks, end-to-end
 p50 did not change (1.66 s to 1.67 s). On the 50-query NanoBEIR sets the
 gains over the published numbers are within noise (NanoMSMARCO p = 0.14,

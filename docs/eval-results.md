@@ -622,7 +622,7 @@ run once more at the end (2026-11-05):
 | Split | Sets |
 |---|---|
 | Dev | NanoSciFact, NanoFiQA2018, NanoHotpotQA; MultiHop-RAG's last 250 non-null queries; golden-v1, golden-v2, golden-v3-dev, multihop-v1, multihop-v2-dev |
-| Held-out | NanoMSMARCO, NanoNQ, NanoNFCorpus (the three with published numbers for the reranker); all 2,255 non-null MultiHop-RAG queries (the first 250 for agentic retrieval); golden-v3-test, multihop-v2-test |
+| Held-out | NanoMSMARCO, NanoNQ, NanoNFCorpus (the three with published numbers for the reranker); all 2,255 non-null MultiHop-RAG queries, which include the 250 dev queries, so results on the other 2,005 are given too (the first 250 for agentic retrieval); golden-v3-test, multihop-v2-test |
 
 A change shipped only if it helped the public dev sets and did not hurt
 RAGScope's own. The held-out sets did point at the problems first (the
@@ -766,6 +766,7 @@ RAGScope's `full_support@10`: every evidence sentence in the top 10.
 | RAGScope BM25 alone, after the fix | 2,255 | 0.629 | 0.318 | 0.886 | 0.755 | 0.304 | 0.05 s |
 | RAGScope production, before | 2,255 | 0.543 | 0.251 | 0.835 | 0.682 | 0.148 | 2.4 s |
 | **RAGScope production, after** | 2,255 | **0.731** | **0.378** | **0.936** | **0.841** | **0.389** | 3.8 s |
+| RAGScope production, after, without the dev queries | first 2,005 | 0.738 | 0.385 | 0.940 | 0.848 | 0.398 | |
 | RAGScope agentic, before | first 250 | 0.569 | 0.296 | 0.860 | 0.704 | 0.272 | 10.2 s |
 | **RAGScope agentic, after** | first 250 | **0.774** | **0.419** | **0.948** | **0.880** | **0.468** | 9.7 s |
 
@@ -773,6 +774,10 @@ The Tang and Yang rows are Table 5 of their paper; Ammann et al.'s
 ([2025](https://arxiv.org/abs/2507.00355)) are Table 1 and Table 4 (latency
 over 250 queries on A100 GPUs). Full-set intervals are about +/-0.02
 (production MRR@10 after: [0.715, 0.745]); on 250 queries about +/-0.05.
+The full set's last 250 queries are the dev set the changes were chosen on.
+Without them production scores higher, MRR@10 0.738 [0.723, 0.755]: the dev
+queries are harder (0.668), so they pull the full-set numbers down rather than
+up, and every published value stays outside the 2,005-query intervals.
 
 - **Single-pass production retrieval now beats the best published
   configuration on every metric,** including Ammann et al.'s, which adds LLM
