@@ -21,7 +21,9 @@ later runs reuse the database.
 
 NanoBEIR (zeta-alpha-ai/Nano*, 50 queries each, binary qrels): NDCG@10 for
 BM25, dense, hybrid (RRF), and hybrid + cross-encoder at production depth
-(top_k=10, so 40 candidates) and at 100 candidates.
+(top_k=10, so 40 candidates) and at 100 candidates. `reference` runs the
+published reranking protocol instead (BM25 top 100 plus missed positives, no
+retrieval), to check the reranker against the published numbers.
 
 MultiHop-RAG (yixuantt/MultiHopRAG, 609 news articles, 2,255 non-null
 queries): articles are split into ~256-token sentence windows, as in the
@@ -46,9 +48,11 @@ from sqlalchemy import func, select
 
 from app.config import settings
 from app.db.session import async_session, init_db
+from app.eval.experiments import _bootstrap_significant
 from app.ingestion.embedders.embedder import get_embedder
 from app.models import Chunk, Document
 from app.retrieval.pipeline import RetrievalPipeline
+from app.retrieval.rerankers import get_reranker
 from app.retrieval.sparse import SparseRetriever
 from app.scripts.answer_eval import _bootstrap
 
@@ -73,9 +77,10 @@ OVERLAP_WORDS = 60
 # ── Data ──────────────────────────────────────────
 
 
-def fetch_rows(dataset: str, config: str) -> list[dict]:
+def fetch_rows(dataset: str, config: str, split: str = "train") -> list[dict]:
     """Every row of one config, via the dataset viewer API (no extra dependencies)."""
-    path = CACHE / dataset.replace("/", "__") / f"{config}.json"
+    name = config if split == "train" else f"{config}-{split}"
+    path = CACHE / dataset.replace("/", "__") / f"{name}.json"
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
     rows: list[dict] = []
@@ -84,13 +89,14 @@ def fetch_rows(dataset: str, config: str) -> list[dict]:
             params = {
                 "dataset": dataset,
                 "config": config,
-                "split": "train",
+                "split": split,
                 "offset": len(rows),
                 "length": 100,
             }
             for attempt in range(5):
                 response = client.get(ROWS_API, params=params)
-                if response.status_code != 429:
+                # The viewer API also returns transient 502s mid-download.
+                if response.status_code != 429 and response.status_code < 500:
                     break
                 time.sleep(2**attempt)
             response.raise_for_status()
@@ -141,9 +147,12 @@ async def ingest(name: str, docs: list[tuple[str, str]]) -> None:
     """Store (doc_id, text) pairs as one chunk each, embedded by the production embedder."""
     await init_db()
     async with async_session() as db:
-        if (await db.execute(select(func.count(Chunk.id)))).scalar():
+        stored = (await db.execute(select(func.count(Chunk.id)))).scalar()
+        if stored == len(docs):
             print("already ingested", flush=True)
             return
+        if stored:
+            raise SystemExit(f"{stored} of {len(docs)} chunks stored; drop the database and rerun")
         document = Document(filename=name, mime_type="text/plain", status="completed")
         db.add(document)
         await db.flush()
@@ -151,6 +160,9 @@ async def ingest(name: str, docs: list[tuple[str, str]]) -> None:
         for start in range(0, len(docs), 256):
             batch = docs[start : start + 256]
             vectors = await embedder.embed([text for _, text in batch])
+            # The embedder returns zero vectors when Ollama fails; never store them.
+            if not all(any(v) for v in vectors):
+                raise SystemExit("embedding failed (zero vectors); drop the database and rerun")
             db.add_all(
                 Chunk(
                     document_id=document.id,
@@ -237,13 +249,34 @@ async def _run(modes: list[str], items: list[tuple[str, object]], score) -> dict
             rows.append(score(chunks, gold))
             if len(rows) % 50 == 0:
                 print(f"{mode}: {len(rows)}/{len(items)}", flush=True)
-        results[mode] = {
-            "n": len(rows),
-            "latency_ms_p50": round(statistics.median(latencies), 1),
-            **{metric: _summary([r[metric] for r in rows]) for metric in rows[0]},
-        }
-        print(mode, json.dumps(results[mode]), flush=True)
+        results[mode] = _summarize(mode, rows, latencies)
     return results
+
+
+def _summarize(mode: str, rows: list[dict], latencies: list[float]) -> dict:
+    result = {
+        "n": len(rows),
+        "latency_ms_p50": round(statistics.median(latencies), 1),
+        **{metric: _summary([r[metric] for r in rows]) for metric in rows[0]},
+    }
+    print(mode, json.dumps(result), flush=True)
+    # Kept out of the printed summary; `compare` pairs these by position.
+    result["per_query"] = {m: [round(r[m], 4) for r in rows] for m in rows[0]}
+    return result
+
+
+def compare(path_a: str, path_b: str) -> None:
+    """Paired bootstrap between two result files, for every mode and metric they share."""
+    a, b = (json.loads(Path(p).read_text(encoding="utf-8")) for p in (path_a, path_b))
+    print("| mode | metric | A | B | delta | p |\n|---|---|---|---|---|---|")
+    for mode in [m for m in a if m in b]:
+        for metric, values_a in a[mode]["per_query"].items():
+            values_b = b[mode]["per_query"][metric]
+            _, p = _bootstrap_significant(values_a, values_b)
+            mean_a, mean_b = statistics.fmean(values_a), statistics.fmean(values_b)
+            print(
+                f"| {mode} | {metric} | {mean_a:.4f} | {mean_b:.4f} | {mean_b - mean_a:+.4f} | {p} |"
+            )
 
 
 # ── Benchmarks ────────────────────────────────────
@@ -272,6 +305,35 @@ async def nanobeir(args) -> dict:
     return await _run(modes, items, score)
 
 
+async def reference(args) -> dict:
+    """The published protocol with RAGScope's reranker and no retrieval.
+
+    sentence-transformers' CrossEncoderNanoBEIREvaluator reranks BM25's top 100
+    (precomputed in sentence-transformers/NanoBEIR-en) plus every relevant
+    document BM25 missed, on document text without titles. Matching its
+    published numbers shows the reranker is wired as the reference assumes;
+    the nanobeir modes show what RAGScope gets when it finds its own candidates.
+    """
+    repo, split = "sentence-transformers/NanoBEIR-en", args.dataset
+    text = {r["_id"]: r["text"] for r in fetch_rows(repo, "corpus", split)}
+    queries = {r["_id"]: r["text"] for r in fetch_rows(repo, "queries", split)}
+    relevant: dict[str, list[str]] = {}
+    for r in fetch_rows(repo, "qrels", split):
+        relevant.setdefault(r["query-id"], []).append(r["corpus-id"])
+    reranker = get_reranker(use_cross_encoder=True)
+    rows, latencies = [], []
+    for r in fetch_rows(repo, "bm25", split):
+        positives = relevant[r["query-id"]]
+        ids = positives + [i for i in r["corpus-ids"][:100] if i not in positives]
+        start = time.perf_counter()
+        ranked = await reranker.rerank(
+            queries[r["query-id"]], [{"chunk_id": i, "content": text[i]} for i in ids], top_k=10
+        )
+        latencies.append((time.perf_counter() - start) * 1000)
+        rows.append({"ndcg@10": ndcg_at_10([c["chunk_id"] for c in ranked], set(positives))})
+    return {"reference": _summarize("reference", rows, latencies)}
+
+
 async def multihop_rag(args) -> dict:
     repo = "yixuantt/MultiHopRAG"
     docs = []
@@ -298,15 +360,27 @@ async def main() -> None:
     sub = parser.add_subparsers(dest="bench", required=True)
     nb = sub.add_parser("nanobeir")
     nb.add_argument("dataset", help="e.g. NanoNFCorpus, NanoMSMARCO, NanoNQ")
+    ref = sub.add_parser("reference", help="the published NanoBEIR reranking protocol")
+    ref.add_argument("dataset", help="e.g. NanoNFCorpus, NanoMSMARCO, NanoNQ")
     mh = sub.add_parser("multihop-rag")
     mh.add_argument("--limit", type=int, default=0, help="first N non-null queries")
     for p in (nb, mh):
         p.add_argument("--modes", nargs="*", choices=list(MODES))
+    for p in (nb, ref, mh):
+        p.add_argument("--tag", default="", help="added to the result file name, e.g. base")
+    cmp = sub.add_parser("compare", help="paired bootstrap between two result files")
+    cmp.add_argument("a")
+    cmp.add_argument("b")
     args = parser.parse_args()
+    if args.bench == "compare":
+        compare(args.a, args.b)
+        return
     _guard()
 
-    results = await (nanobeir(args) if args.bench == "nanobeir" else multihop_rag(args))
-    name = args.dataset if args.bench == "nanobeir" else f"MultiHopRAG-{args.limit or 'all'}"
+    run = {"nanobeir": nanobeir, "reference": reference, "multihop-rag": multihop_rag}
+    results = await run[args.bench](args)
+    name = f"MultiHopRAG-{args.limit or 'all'}" if args.bench == "multihop-rag" else args.dataset
+    name += f"-{args.tag}" if args.tag else ""
     RESULTS.mkdir(parents=True, exist_ok=True)
     out = RESULTS / f"{name}-{'-'.join(results)}.json"
     out.write_text(json.dumps(results, indent=2), encoding="utf-8")
