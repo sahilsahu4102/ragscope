@@ -592,7 +592,7 @@ questions it returned unsplit.
   answers, and with no answer in the context it sometimes guesses where the
   verbose prompt hedged. Because this was found on the test set, the prompt was
   not changed afterwards: a fix has to be tuned on dev and confirmed on a
-  fresh test split.
+  fresh test split. The rule was dropped on 2026-11-05 (next section).
 - The merge now protects one chunk instead of two. Phase 8 measured the
   two-chunk merge on golden-v2 (no regression); the one-chunk merge has only
   been measured on golden-v3, where agentic put the answer in the top 3 for
@@ -605,6 +605,52 @@ questions it returned unsplit.
 
 Per-question results, including the context each answer was generated from,
 are in `eval-datasets/results/` (`baseline-*`, `after-*`, `after-agentic-*`).
+
+### Follow-up: the partial-answer rule (2026-11-05)
+
+The cause named above was one prompt rule: "If it answers only part, give that
+part and say which part the documents do not cover." The 3B model reads it as a
+request for a closing caveat and adds "the documents do not specify..." about
+things the question never asked, even when its context holds every fact. It was
+replaced with "Do not add remarks about what the context does not say."
+
+A deterministic check counts the problem: a **false tail** is a "does not
+specify / not mentioned / no information" remark in an answer whose context held
+every required fact (`context_full_support` = 1). Generation runs at temperature
+0.3, so each prompt ran twice; p-values pair the first runs by question.
+
+| Measure | Old prompt | New prompt | p |
+|---|---|---|---|
+| Dev (golden-v3-dev, multihop-v2-dev, multihop-v1; 62): false tails | 6, 8 | 1, 1 | 0.018 |
+| Dev: required facts in the answer | 0.812, 0.801 | 0.804, 0.801 | 0.88 |
+| Dev: answers that flag a fact missing from their context | 9, 12 of 16 | 6, 7 of 16 | |
+| Test (golden-v3-test, multihop-v2-test; 96): false tails | 11, 12 | 1, 0 | 0.002 |
+| Test: required facts in the answer | 0.861, 0.840 | 0.856, 0.840 | 0.95 |
+| Test: answers that flag a fact missing from their context | 5, 4 of 12 | 4, 4 of 12 | |
+| Test: judged correctness / faithfulness (88 graded in both runs) | 0.898 / 0.886 | 0.892 / 0.903 | 0.87 / 0.54 |
+| Test: p50 end to end; output tokens | 2.29 s, 2.33 s; 52, 54 | 2.07 s, 2.13 s; 48, 46 | |
+
+- The change was chosen on dev. A scoped rewording ("name the parts it does
+  not give; never mention details the question did not ask for") was tried
+  first and did not help (8 and 4 false tails).
+- The model still says when part of the answer is missing, now more often as "I
+  don't have enough information ... to answer the second part". On dev it
+  flags fewer of the real gaps (6-7 of 16 against 9-12); on test, the same.
+- Judged faithfulness rose on golden-v3-test (0.879 to 0.931, n = 58) and fell
+  on multihop-v2-test (0.900 to 0.850, n = 30). Neither part nor the whole is
+  significant, so this is not a faithfulness gain.
+- This is not the fresh test split the section above asked for. golden-v3-test
+  and multihop-v2-test were also used for Phase 9, where this problem was
+  found, and for the public-benchmark rerun. A fresh split could not be drafted
+  because the Gemini free tier returned 503 (high demand) for most of
+  2026-11-05, so a fresh-split confirmation is still to do.
+- Under both prompts the 3B model sometimes invents a figure when a fact is
+  missing from its context (a warmup-step count, a RoPE base). That, not the
+  tails, is the remaining faithfulness problem.
+
+Runs: `eval-datasets/results/dev/prompt-{old,new,scoped}-{1,2}.jsonl` and
+`eval-datasets/results/prompt-{old,new}-{1,2}-test.jsonl` (the first test run
+of each prompt carries the judge's grades).
 
 ## Public benchmarks (NanoBEIR, MultiHop-RAG)
 
@@ -847,6 +893,19 @@ characters per chunk) and agentic 9.7 s (first 40). The CPU run's production
 scores on its 100 queries equal the GPU run's on every metric. On RAGScope's
 own corpus, whose chunks are short, end-to-end p50 did not move: 1.66 s to
 1.67 s on golden-v3-test and 5.37 s to 5.17 s on multihop-v2-test.
+
+Faster CPU runtimes for the same reranker were tried on 2026-11-05 and none
+shipped. On 20 MultiHop-RAG dev queries of 40 chunks each (4 CPUs, an i5-12450H),
+PyTorch fp32 takes 2.90 s at p50. The model repository's own exports, run
+directly, were slower without changing scores: ONNX Runtime fp32 3.63 s, its O3
+graph 3.91 s, OpenVINO fp32 3.92 s. The 8-bit versions were faster but changed
+the ranking on every query (same top-10 order in 0 of 20): PyTorch dynamic int8
+2.47 s, ONNX int8 3.27 s, OpenVINO int8 2.01 s. bf16 took 13.9 s, since this CPU
+has no bf16 instructions, and batch size or length-sorted batches moved it by
+under 5%. (The sentence-transformers `onnx` and `openvino` backends could not be
+used at all: their `optimum` packages downgrade transformers below the version
+ettin needs.) The cost stays where it is, and it only shows on long chunks:
+`/query` reranks 12 candidates, not 40.
 
 Two held-out runs were cut off by Docker errors (a DNS failure reaching
 Postgres in the agentic run, a lost container in the judged agentic run) and

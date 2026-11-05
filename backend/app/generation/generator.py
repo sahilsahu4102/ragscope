@@ -23,6 +23,11 @@ tracer = get_tracer("generation")
 # Until 2026-11 the prompt asked for "a well-structured answer" and a closing
 # list of sources. The 3B model wrote 150-300 tokens per answer, and output
 # length is most of the end-to-end time (docs/eval-results.md, Phase 9).
+# Until 2026-11-05 it also said "If it answers only part, give that part and say
+# which part the documents do not cover." The 3B model read that as a request
+# for a closing caveat and added "the documents do not specify..." about things
+# nobody asked, on 6-8 of 62 dev answers whose context held every fact (1 of 62
+# without the rule). It still says when a part of the question is missing.
 GROUNDED_QA_PROMPT = """You are RAGScope. Answer the question using only the numbered context passages.
 
 ## Context
@@ -36,7 +41,7 @@ GROUNDED_QA_PROMPT = """You are RAGScope. Answer the question using only the num
 - Use the exact numbers, names and units the context gives.
 - Cite the passage after each claim with its number, like [1] or [2][3].
 - If the context does not answer the question, reply only: "I don't have enough information in the provided documents to answer this question."
-- If it answers only part, give that part and say which part the documents do not cover.
+- Do not add remarks about what the context does not say.
 - No preamble and no list of sources."""
 
 
