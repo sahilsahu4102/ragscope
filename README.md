@@ -70,7 +70,7 @@ graph TB
 | **Frontend** | Next.js 15 (App Router) | SSR, React Server Components |
 | **Database** | PostgreSQL 16 + pgvector | Relational + vector in one DB |
 | **LLM** | Ollama (Llama 3.2 3B) | Self-hosted; 3B fits a 4GB GPU fully, 8B did not |
-| **Reranker** | ms-marco-MiniLM-L-6-v2 (22M) | Cross-encoder; 123x faster and better than LLM scoring |
+| **Reranker** | ettin-reranker-32m-v1 (33M) | Cross-encoder, far faster and better than LLM scoring; replaced MiniLM-L-6 (22M) after the public benchmarks |
 | **Embeddings** | Dual: Ollama + Gemini API | Swappable registry, benchmark both |
 | **Vector index** | pgvector HNSW (m=16, ef=64) | 82x over exact scan at 100k, recall@10 0.995 |
 | **Cache/Queue** | Redis 7 + Celery | Semantic cache + async ingestion |
@@ -140,20 +140,32 @@ What the measurements overturned:
   say" as a correct answer. All fixed before the Phase 9 baseline was taken.
 - **Entity-graph retrieval.** It made no measurable difference. The
   cross-encoder reorders its extra candidates back to the same top 10.
+- **The golden sets could not see two bugs.** Public benchmarks showed the
+  reranker reading only the first 800 characters of each passage (RAGScope's
+  own chunks are at most 511, so its sets never triggered it) and BM25 splitting
+  on whitespace, so "broccoli?" never matched "broccoli". Both fixed, and the
+  reranker replaced by a stronger one of the same size class, each chosen on
+  dev splits before the held-out sets were rerun.
 
-**Public benchmarks.** The same pipeline, unchanged, on public data with
-published results (`app/scripts/public_bench.py`; method and caveats in
-[docs/eval-results.md](docs/eval-results.md#public-benchmarks-nanobeir-multihop-rag)):
+**Public benchmarks.** The production pipeline on public data with published
+results (`app/scripts/public_bench.py`). Held-out sets, run once after the fixes
+were chosen on dev splits; protocol, ablations and caveats in
+[docs/eval-results.md](docs/eval-results.md#public-benchmarks-nanobeir-multihop-rag):
 
-| Benchmark | Metric | RAGScope (production) | Published reference |
-|---|---|---|---|
-| NanoMSMARCO (50 queries) | NDCG@10 | 0.663 | 0.669, same cross-encoder on BM25 top 100 plus missed positives |
-| NanoNQ (50 queries) | NDCG@10 | 0.708 | 0.760, same |
-| NanoNFCorpus (50 queries) | NDCG@10 | 0.322 | 0.393, same |
-| MultiHop-RAG (2,255 queries) | Hits@10 / Hits@4 / MRR@10 | 0.835 / 0.682 / 0.543 | 0.747 / 0.663 / 0.586, best in the paper (voyage-02 + bge-reranker-large, 560M) |
+| Benchmark | Metric | Before | After | Best published |
+|---|---|---|---|---|
+| MultiHop-RAG (2,255 queries) | MRR@10 / MAP@10 / Hits@10 / Hits@4 | 0.543 / 0.251 / 0.835 / 0.682 | **0.731 / 0.378 / 0.936 / 0.841** | 0.635 / 0.322 / 0.872 / 0.763 ([Ammann et al., 2025](https://arxiv.org/abs/2507.00355): bge-reranker-large, 560M, plus LLM query decomposition) |
+| NanoMSMARCO (50 queries) | NDCG@10 | 0.663 | **0.707** | 0.669 (MiniLM reranking BM25's top 100 plus every missed relevant document) |
+| NanoNQ (50 queries) | NDCG@10 | 0.708 | **0.767** | 0.760 (same) |
+| NanoNFCorpus (50 queries) | NDCG@10 | 0.322 | 0.337 | 0.393 (same; ~50 relevant documents per query, all handed to the reranker) |
 
-The weak part is BM25: it splits on whitespace only, and scores 0.07-0.16
-NDCG@10 below the reference BM25 on all three NanoBEIR sets.
+MultiHop-RAG's "after" is single-pass, with no LLM call before the answer, and
+its 95% intervals clear every published value. It costs 3.8 s a query on 4 CPUs
+(2.4 s before); on RAGScope's own corpus, with its shorter chunks, end-to-end
+p50 did not change (1.66 s to 1.67 s). NanoNFCorpus is the one miss.
+The published protocol gives the reranker every relevant document, which
+matters most where queries have dozens, and on that medical set the old
+reranker with the two fixes scored higher (0.357).
 
 ## Latency work
 

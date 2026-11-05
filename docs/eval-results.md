@@ -608,54 +608,140 @@ are in `eval-datasets/results/` (`baseline-*`, `after-*`, `after-agentic-*`).
 
 ## Public benchmarks (NanoBEIR, MultiHop-RAG)
 
-The golden sets above are small and come from RAGScope's own corpus, so on
-2026-11-04 the production retrieval pipeline was also run, unchanged (same
-models, same settings), on two public benchmarks with published results:
-`app/scripts/public_bench.py`. Each benchmark has its own `bench_*` database,
-and the script refuses any other, so no public data reaches the main corpus.
+The golden sets above are small and come from RAGScope's own corpus, so the
+production retrieval pipeline also runs on two public benchmarks with published
+results: `app/scripts/public_bench.py`. Each benchmark has its own `bench_*`
+database, and the script refuses any other, so no public data reaches the main
+corpus.
 
-### NanoBEIR: single-hop retrieval, NDCG@10
+The first run (2026-11-04, the code as it stood) fell short of the published
+numbers, and finding out why turned up two bugs and a better reranker. Every
+change after that was decided on development data, and the held-out sets were
+run once more at the end (2026-11-05):
 
-NanoBEIR is a 50-query subset of each BEIR dataset (binary relevance). With 50
-queries the 95% intervals are about +/-0.1 (production on NanoNQ: 0.708,
-[0.605, 0.804]).
+| Split | Sets |
+|---|---|
+| Dev | NanoSciFact, NanoFiQA2018, NanoHotpotQA; MultiHop-RAG's last 250 non-null queries; golden-v1, golden-v2, golden-v3-dev, multihop-v1, multihop-v2-dev |
+| Held-out | NanoMSMARCO, NanoNQ, NanoNFCorpus (the three with published numbers for the reranker); all 2,255 non-null MultiHop-RAG queries (the first 250 for agentic retrieval); golden-v3-test, multihop-v2-test |
+
+A change shipped only if it helped the public dev sets and did not hurt
+RAGScope's own. The held-out sets did point at the problems first (the
+2026-11-04 NanoNFCorpus gap is how the 800-character cut was found), but nothing
+was chosen or tuned on them after that.
+
+### What changed, and what was dropped
+
+NanoBEIR dev, production NDCG@10 (SciFact / FiQA / HotpotQA). Each row is on
+top of the kept rows above it:
+
+| Change | NDCG@10 | Decision |
+|---|---|---|
+| Before (the 2026-11-04 code) | 0.723 / 0.483 / 0.879 | |
+| 1. The reranker reads whole passages (up to 512 tokens), not the first 800 characters | 0.740 / 0.500 / 0.876 | kept |
+| 2. BM25 tokenizes with Postgres's English lexemes, not `lower().split()` | 0.745 / 0.515 / 0.886 | kept |
+| nomic-embed-text task prefixes (`search_query:` / `search_document:`) | 0.742 / 0.514 / 0.886 | dropped: no gain |
+| Blend the reranker score with the first-stage rank | 0.779 / 0.523 / 0.904 | rejected: golden-v2 NDCG@10 -0.013, multihop-v1 -0.041 |
+| 3. Reranker `cross-encoder/ettin-reranker-32m-v1` instead of `ms-marco-MiniLM-L-6-v2` | 0.754 / 0.555 / 0.936 | kept |
+
+1. **The 800-character cut.** The cross-encoder scored only the first 800
+   characters of each passage, on the theory that relevance shows early. That
+   hid the end of 93% of NanoNFCorpus documents and 96% of MultiHop-RAG chunks.
+   RAGScope's own chunks are at most 511 characters, so its own sets could not
+   show it.
+2. **BM25 tokenization.** `SparseRetriever` split on whitespace, so punctuation
+   stayed attached ("broccoli?" never matched "broccoli") and nothing was
+   stemmed. It now indexes `to_tsvector('english', ...)`, the lexemes Postgres
+   full-text search already stores, each repeated once per position so term
+   frequencies survive. BM25 alone on dev went from 0.576 / 0.231 / 0.671 to
+   0.714 / 0.423 / 0.838.
+3. **The reranker.** On MultiHop-RAG the rest of the gap to the papers was at
+   the top of the ranking (MRR@10), and both papers rerank with
+   bge-reranker-large (560M). Six cross-encoders were compared on the dev sets,
+   each reranking the same candidates (production's 40 per query, captured
+   once; there MiniLM reproduced its production scores to within one query):
+
+   | Reranker | Params | CPU, 40 chunks | MultiHop-RAG dev MRR@10 / MAP@10 / Hits@10 / Hits@4 | NanoBEIR dev |
+   |---|---|---|---|---|
+   | ms-marco-MiniLM-L-6-v2 (before) | 23M | 2.1 s | 0.528 / 0.239 / 0.820 / 0.652 | 0.745 / 0.515 / 0.886 |
+   | ettin-reranker-17m-v1 | 18M | 1.2 s | 0.635 / 0.308 / 0.904 / 0.780 | 0.770 / 0.565 / 0.942 |
+   | **ettin-reranker-32m-v1** | 33M | 2.9 s | **0.667 / 0.329 / 0.908 / 0.784** | 0.754 / 0.555 / 0.936 |
+   | ettin-reranker-68m-v1 | 69M | 9.0 s | 0.682 / 0.336 / 0.932 / 0.804 | 0.747 / 0.591 / 0.945 |
+   | ettin-reranker-150m-v1 | 151M | not timed | 0.688 / 0.344 / 0.928 / 0.804 | 0.764 / 0.614 / 0.948 |
+   | bge-reranker-large (the papers') | 560M | not timed | 0.658 / 0.315 / 0.884 / 0.764 | 0.766 / 0.526 / 0.947 |
+
+   CPU times are medians over 20 MultiHop-RAG queries on 4 CPUs, run the way
+   production runs them. 32m was picked over 17m, which lost recall on
+   multihop-v1 (0.667 to 0.556, p = 0.03), and over 68m (3x the CPU time) and
+   150m, which add +0.015 and +0.021 MRR@10. On RAGScope's dev sets, each
+   run the way it is served, 32m raised golden-v3-dev NDCG@10 from 0.917 to
+   1.000 (p = 0.004) and multihop-v2-dev full support from 0.63 to 1.00
+   (p < 0.001), and left golden-v2 within noise (0.902 to 0.890, p = 0.71). On
+   multihop-v1 (agentic) NDCG@10 rose from 0.701 to 0.779 (p = 0.018) while full
+   support fell from 10 to 8 of 18 questions (p = 0.29). Passages stay capped
+   at 512 tokens: uncapped, ettin scored no better on the long-document dev sets
+   and ran 1.5x slower. The ettin-reranker-v1 models are distilled from
+   mxbai-rerank-large-v2 on a mix that includes MS MARCO, NQ, HotpotQA, FiQA and
+   FEVER training data (MiniLM's includes MS MARCO), and not MultiHop-RAG.
+4. **Agentic merge: unchanged.** Ammann et al. rerank the union of all
+   sub-query results against the original question. With the hops replayed from
+   recorded sub-queries, so the LLM's randomness is held fixed, that union, a
+   max-score variant and protecting the original question's top 2 were compared
+   with the shipped merge (the original's top 1, then each hop's best). None beat
+   it on every dev set under either reranker. With MiniLM the union lost
+   MultiHop-RAG MAP@10 (0.270 to 0.242, p < 0.001).
+
+### NanoBEIR (held-out): NDCG@10
+
+NanoBEIR is a 50-query subset of each BEIR dataset (binary relevance), so the
+95% intervals are about +/-0.1 and p-values are paired over the 50 queries.
 
 | Mode | NanoNFCorpus | NanoMSMARCO | NanoNQ |
 |---|---|---|---|
-| BM25 (rank-bm25) | 0.253 | 0.429 | 0.341 |
+| BM25 (rank-bm25): before / after | 0.253 / **0.347** | 0.429 / 0.485 | 0.341 / **0.530** |
 | BM25, published | 0.325 | 0.541 | 0.501 |
-| Dense (nomic-embed-text) | 0.321 | 0.557 | 0.659 |
-| Hybrid (RRF) | 0.316 | 0.569 | 0.546 |
-| **Hybrid + cross-encoder, 40 candidates (production)** | **0.322** | **0.663** | **0.708** |
-| Hybrid + cross-encoder, 100 candidates | 0.336 | 0.663 | 0.725 |
-| Same cross-encoder, published | 0.393 | 0.669 | 0.760 |
+| Dense (nomic-embed-text, unchanged) | 0.321 | 0.557 | 0.659 |
+| Hybrid (RRF): before / after | 0.316 / 0.365 | 0.569 / 0.562 | 0.546 / 0.648 |
+| Production, before (MiniLM, 800-character cut) | 0.322 | 0.663 | 0.708 |
+| Production, the two fixes with MiniLM (ablation) | 0.357 | 0.663 | 0.744 |
+| **Production, after (the fixes and ettin-32m)** | 0.337 | **0.707** | **0.767** |
+| Published: MiniLM reranking BM25's top 100 plus every relevant document BM25 missed | 0.393 | 0.669 | 0.760 |
+| That protocol here: MiniLM | 0.393 | 0.669 | 0.760 |
+| That protocol here: MiniLM with the 800-character cut | 0.380 | 0.669 | 0.736 |
+| That protocol here: ettin-32m | 0.380 | 0.707 | 0.780 |
 
-The published rows come from sentence-transformers' `CrossEncoderNanoBEIREvaluator`,
+The published rows come from sentence-transformers' `CrossEncoderNanoBEIREvaluator`
 as reported on the model card of a fine-tune of
 `cross-encoder/ms-marco-MiniLM-L6-v2`
 ([ayushexel/reranker-ms-marco-MiniLM-L6-v2-gooaq-bce](https://huggingface.co/ayushexel/reranker-ms-marco-MiniLM-L6-v2-gooaq-bce)):
-the cross-encoder row is its pre-training evaluation (epoch -1, the base
-model), and the BM25 row is the evaluator's BM25 baseline, derived from the
-deltas the card prints. That evaluator reranks BM25's top 100 and, with
-`always_rerank_positives`, adds every relevant document BM25 missed, so it is
-an upper bound for a pipeline that has to find its own candidates.
+the cross-encoder row is its pre-training evaluation (the base model), and the
+BM25 row is the evaluator's BM25 baseline. `public_bench.py reference` runs that
+protocol: BM25's top 100 from the evaluator's own lists, plus every relevant
+document it missed, on document text without titles.
 
-- **The reranked pipeline is close to the reference.** On NanoMSMARCO it is
-  within 0.006. On NanoNQ and NanoNFCorpus it is 0.035 and 0.057 below at 100
-  candidates, inside the intervals and in the direction the added positives
-  predict.
-- **BM25 is the weak part.** It is 0.07-0.16 below the reference BM25 on all
-  three. `SparseRetriever` tokenizes with `lower().split()`
-  (`app/retrieval/sparse.py`, lines 191 and 237), so punctuation stays attached
-  to words (a query word followed by "?" never matches) and there is no
-  stemming or stopword removal. On NanoNQ, hybrid (0.546) scores below dense
-  alone (0.659). The intervals overlap at 50 queries, but the direction matches
-  a weak BM25 dragging the fusion down. A tokenizer fix is next, validated on
-  the dev splits before it changes any default.
-- **100 candidates instead of 40** adds 0.000-0.017 and roughly doubles
-  reranking time (NanoMSMARCO p50 1.1 s to 2.1 s), so production stays at 40.
+- **The harness reproduces the published numbers.** With that protocol the
+  MiniLM reranker scores 0.393 / 0.669 / 0.760, the published values to three
+  decimals. With the old 800-character cut it loses 0.013 and 0.024 on the two
+  sets with long documents and nothing on NanoMSMARCO, whose passages are short.
+  The cut, not the wiring, caused the 2026-11-04 gap.
+- **Production now beats the published reranker numbers on NanoMSMARCO
+  (+0.038) and NanoNQ (+0.007)** without being handed the relevant documents,
+  and after the tokenizer fix BM25 beats the published BM25 on NanoNFCorpus and
+  NanoNQ (it is still below it on NanoMSMARCO, 0.485 against 0.541). Against
+  before: production +0.016 / +0.044 / +0.059 (p = 0.54 / 0.11 / 0.032), BM25
+  +0.094 / +0.056 / +0.189 (p < 0.001 / 0.28 / < 0.001).
+- **NanoNFCorpus stays below the published row** (0.337 against 0.393). Its
+  queries have 50 relevant documents on average (median 23.5) against about one
+  for the other two, so a protocol that adds every one of them to the candidates
+  gains most there, and ettin is weaker than MiniLM on this medical set
+  (0.380 against 0.393 on the same protocol). On this set the fixes with MiniLM
+  (0.357) score above the shipped reranker (p = 0.34), and hybrid alone scores
+  0.365.
+- On NanoNQ the fixes give +0.037 and the reranker +0.023 more; on NanoNFCorpus
+  the fixes give +0.036 (p < 0.001). On NanoMSMARCO it is all the reranker
+  (+0.044): the passages are short, and BM25's gain there does not survive
+  fusion.
 
-### MultiHop-RAG: multi-hop retrieval over news
+### MultiHop-RAG (held-out)
 
 MultiHop-RAG ([Tang and Yang, 2024](https://arxiv.org/abs/2401.15391)) has 609
 news articles and 2,556 queries that each need evidence from 2-4 articles; the
@@ -666,40 +752,103 @@ source and date, and scored with the logic of the benchmark's
 spaces and newlines removed, is a substring of it). "All evidence" is
 RAGScope's `full_support@10`: every evidence sentence in the top 10.
 
-| Run | Queries | MRR@10 | Hits@10 | Hits@4 | All evidence | p50 |
-|---|---|---|---|---|---|---|
-| Dense (nomic-embed-text) | 2,255 | 0.451 | 0.776 | 0.592 | 0.131 | 0.06 s |
-| Best published, no reranker (bge-large-en-v1.5) | | 0.430 | 0.672 | 0.522 | | |
-| **Production (hybrid + MiniLM cross-encoder)** | 2,255 | **0.543** | **0.835** | **0.682** | 0.148 | 2.4 s |
-| Best published, reranked (voyage-02 + bge-reranker-large) | | 0.586 | 0.747 | 0.663 | | |
-| Production, first 250 queries | 250 | 0.541 | 0.832 | 0.668 | 0.184 | 2.3 s |
-| Agentic, first 250 queries | 250 | 0.569 | 0.860 | 0.704 | 0.272 | 10.2 s |
+| Run | Queries | MRR@10 | MAP@10 | Hits@10 | Hits@4 | All evidence | Time per query |
+|---|---|---|---|---|---|---|---|
+| Tang and Yang: voyage-02 + bge-reranker-large (their best) | | 0.586 | | 0.747 | 0.663 | | |
+| Ammann et al.: bge-large-en-v1.5 | eval split | 0.464 | 0.217 | 0.781 | 0.611 | | 0.03 s |
+| Ammann et al.: + bge-reranker-large | eval split | 0.574 | 0.274 | 0.781 | 0.687 | | 0.88 s |
+| Ammann et al.: + LLM query decomposition | eval split | 0.498 | 0.238 | 0.810 | 0.655 | | 16.7 s |
+| Ammann et al.: both (their best) | eval split | 0.635 | 0.322 | 0.872 | 0.763 | | 18.9 s |
+| RAGScope BM25 alone, after the fix | 2,255 | 0.629 | 0.318 | 0.886 | 0.755 | 0.304 | 0.05 s |
+| RAGScope production, before | 2,255 | 0.543 | 0.251 | 0.835 | 0.682 | 0.148 | 2.4 s |
+| **RAGScope production, after** | 2,255 | **0.731** | **0.378** | **0.936** | **0.841** | **0.389** | 3.8 s |
+| RAGScope agentic, before | first 250 | 0.569 | 0.296 | 0.860 | 0.704 | 0.272 | 10.2 s |
+| **RAGScope agentic, after** | first 250 | **0.774** | **0.419** | **0.948** | **0.880** | **0.468** | 9.7 s |
 
-Published rows are Table 5 of the paper. Full-set intervals are about +/-0.02
-(production MRR@10 [0.526, 0.560]); on 250 queries about +/-0.05.
+The Tang and Yang rows are Table 5 of their paper; Ammann et al.'s
+([2025](https://arxiv.org/abs/2507.00355)) are Table 1 and Table 4 (latency
+over 250 queries on A100 GPUs). Full-set intervals are about +/-0.02
+(production MRR@10 after: [0.715, 0.745]); on 250 queries about +/-0.05.
 
-- **Dense retrieval alone beats every published unreranked row** on all three
-  metrics. **Production beats the best published reranked row on Hits@10
-  (+0.09) and Hits@4 (+0.02) and is 0.04 lower on MRR@10**, with a 22M
-  cross-encoder where the paper uses bge-reranker-large (560M).
-- **Agentic retrieval** (first 250 queries only, because it costs ~10 s a
-  query): MRR@10 +0.03 and Hits@10 +0.03, both inside the intervals, and every
-  evidence sentence in the top 10 for 27% of queries instead of 18%, at 4.4x
-  the latency. [Ammann et al., 2025](https://arxiv.org/abs/2507.00355) report a
-  larger gain from decomposition on the same benchmark (MRR@10 0.464 to 0.635,
-  +16.7 s a query) from a lower baseline.
-- The first 250 queries are in dataset order, not a random sample. Production
-  on them is within 0.015 of the full set on every metric, so they are
-  representative at least for that mode.
-- **MAP@10 is not compared.** RAGScope gets 0.21-0.30 against the paper's
-  0.31-0.48, while MRR@10 is similar. The paper's MAP is higher relative to its
-  MRR than the released script produces on these runs, so how it was computed
-  could not be reproduced. The values are in the result files.
-- Same queries, corpus and scoring script, but not the same chunker or
-  hardware: the paper's pipeline used LlamaIndex, and these runs used one
-  RTX 3050 Laptop (4 GB VRAM).
+- **Single-pass production retrieval now beats the best published
+  configuration on every metric,** including Ammann et al.'s, which adds LLM
+  query decomposition (18.9 s a query on an A100) to a 560M reranker:
+  MRR@10 +0.096, MAP@10 +0.056, Hits@10 +0.064, Hits@4 +0.078, each outside
+  the full-set interval. Against Tang and Yang's best: MRR@10 +0.145, Hits@10
+  +0.189, Hits@4 +0.178.
+- **Where it came from**, paired on the first 250 queries: the two fixes with
+  MiniLM, MRR@10 0.541 to 0.578 (p = 0.04) and Hits@10 0.832 to 0.864
+  (p = 0.15); then the reranker swap, MRR@10 0.578 to 0.774 and Hits@4 0.700 to 0.868
+  (p < 0.001 for both). The before side is a rerun of the 2026-11-04 code:
+  production matched that run exactly; agentic, which samples its
+  sub-questions, gave MRR@10 0.563.
+- **BM25 alone**, after the tokenizer fix, comes within 0.01 of Ammann et al.'s
+  best on MRR@10, MAP@10 and Hits@4, beats it on Hits@10, and beats every other
+  published row. MultiHop-RAG's questions name the outlets, people and
+  products their evidence mentions, which is what lexical matching is for.
+- **Agentic retrieval** (first 250 queries) adds MAP@10 +0.018 and all-evidence
+  +0.052 over production on the same queries (p < 0.001 for both), not MRR@10
+  (+0.001, p = 0.93), for ~6 s more a query. Against before: MRR@10 0.569 to 0.774, all evidence
+  0.272 to 0.468.
+- **MAP@10 is compared with Ammann et al. only.** Their values sit on the scale
+  of the released `retrieval_evaluate.py`; Tang and Yang's (0.31-0.48) are higher
+  relative to their MRR than that script produces on any run here, so how they
+  were computed could not be reproduced.
+- Same queries, corpus and scoring logic, but not the same chunker. Like
+  RAGScope, the benchmark's own `simple_retrieval.py` attaches each article's
+  title, source and date to every chunk and uses ~256-token chunks, but its
+  chunks overlap by 25 tokens where RAGScope's overlap by ~80. Ammann et al. do
+  not size their evaluation split or name their chunker.
 
-Per-mode results with intervals are in `eval-datasets/results/public/`.
+### RAGScope's own held-out sets
+
+The same comparison on golden-v3-test (62 single-fact questions, served
+single-pass) and multihop-v2-test (34 two-passage questions, served agentic),
+judged as in Phase 9 and paired against the Phase 9 results:
+
+| Set | Metric | Phase 9 | After | p |
+|---|---|---|---|---|
+| golden-v3-test (62, single-pass) | Context recall | 0.903 | 0.952 | 0.20 |
+| | Judged correctness | 0.863 | 0.879 | 0.69 |
+| | Judged faithfulness | 0.855 | 0.863 | 0.87 |
+| multihop-v2-test (34, agentic) | Both passages retrieved | 0.794 | 0.912 | 0.094 |
+| | Judged correctness | 0.882 | 0.912 | 0.53 |
+| | Judged faithfulness | 0.926 | 0.912 | 0.96 |
+| | Every required fact in the answer | 0.735 | 0.824 | 0.20 |
+
+Retrieval improved on both sets and correctness with it, none of it
+significant at 34-62 questions: Phase 9 had left little room (two-passage
+retrieval was already 27 of 34, now 31). Faithfulness on multihop-v2-test fell
+by 0.015 (p = 0.96), inside the noise. A second run of the same code, made
+for the latency figures below, retrieved both passages for 30 of 34 with
+judged correctness 0.882: agentic retrieval samples its sub-questions, so
+these move by a question or two between runs.
+
+### Hardware and latency
+
+The published latencies are on A100 GPUs. RAGScope runs on one laptop: an RTX
+3050 (4 GB) for Ollama and 4 CPUs for the reranker. To fit one night, the
+held-out runs above put the reranker on the GPU next to Ollama, so their
+timings are not the deployed ones; offline, the GPU reproduced the CPU's dev
+scores to within one query. The times in the tables come from separate runs
+with the reranker on the CPU, as deployed: MultiHop-RAG production 3.8 s a
+query at p50 (first 100 queries; 2.4 s before, when the reranker read 800
+characters per chunk) and agentic 9.7 s (first 40). The CPU run's production
+scores on its 100 queries equal the GPU run's on every metric. On RAGScope's
+own corpus, whose chunks are short, end-to-end p50 did not move: 1.66 s to
+1.67 s on golden-v3-test and 5.37 s to 5.17 s on multihop-v2-test.
+
+Two held-out runs were cut off by Docker errors (a DNS failure reaching
+Postgres in the agentic run, a lost container in the judged agentic run) and
+were rerun; a cut-off run writes no result, so nothing was chosen between runs.
+
+Per-mode results with intervals and per-query rows are in
+`eval-datasets/results/public/` (tags: `base` before, `final` after, `minilm`
+the ablation, `cpu` the latency runs; `*-reference.json` the published
+protocol). The dev-stage evidence is in `eval-datasets/results/dev/`:
+`reranker-compare-dev.json` (per-query scores for the six rerankers),
+`reranker-uncapped-dev.json` (ettin without the 512-token cap) and
+`golden-retrieval-*.json` (RAGScope's golden sets under each candidate fix).
 
 ## Limitations
 
@@ -737,12 +886,15 @@ python -m app.scripts.answer_eval run /eval-datasets/golden-v3-test.jsonl --labe
 python -m app.scripts.answer_eval run /eval-datasets/multihop-v2-test.jsonl --label agentic --strategy agentic --out /eval-datasets/results/after-agentic-multihop-v2-test.jsonl
 python -m app.scripts.answer_eval compare /eval-datasets/results/baseline-golden-v3-test.jsonl /eval-datasets/results/after-golden-v3-test.jsonl
 
-# Public benchmarks (each in its own bench_* database; data is downloaded and cached on first run)
+# Public benchmarks (each in its own bench_* database; data is downloaded and cached on first run).
+# The reranker is RERANKER_MODEL (default in app/config.py); an .env that pins it wins, so pass -e to choose.
 docker compose exec postgres createdb -U ragscope bench_nanonq
-docker compose run --rm -e POSTGRES_DB=bench_nanonq backend python -m app.scripts.public_bench nanobeir NanoNQ
+docker compose run --rm -e POSTGRES_DB=bench_nanonq backend python -m app.scripts.public_bench nanobeir NanoNQ --modes bm25 dense hybrid production --tag final
+docker compose run --rm -e POSTGRES_DB=bench_nanonq -e RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2 backend python -m app.scripts.public_bench reference NanoNQ --tag minilm
 docker compose exec postgres createdb -U ragscope bench_multihoprag
-docker compose run --rm -e POSTGRES_DB=bench_multihoprag backend python -m app.scripts.public_bench multihop-rag --modes dense production
-docker compose run --rm -e POSTGRES_DB=bench_multihoprag backend python -m app.scripts.public_bench multihop-rag --limit 250 --modes agentic
+docker compose run --rm -e POSTGRES_DB=bench_multihoprag backend python -m app.scripts.public_bench multihop-rag --modes bm25 hybrid production --tag final
+docker compose run --rm -e POSTGRES_DB=bench_multihoprag backend python -m app.scripts.public_bench multihop-rag --limit 250 --modes agentic --tag final
+docker compose run --rm backend python -m app.scripts.public_bench compare /eval-datasets/results/public/NanoNQ-base-bm25-dense-hybrid-production.json /eval-datasets/results/public/NanoNQ-final-bm25-dense-hybrid-production.json
 
 # Run the A/B
 curl -X POST localhost:8000/api/v1/experiments \
