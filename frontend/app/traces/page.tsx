@@ -1,20 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { TraceDetail, TraceSummary } from "@/lib/types";
-import { ms, num, shortId, timeAgo, usd } from "@/lib/format";
-import { SpanWaterfall } from "@/components/SpanWaterfall";
-import { Badge, Card, EmptyState, ErrorState, Loading, PageHeader } from "@/components/ui";
+import { dateTime, ms, num, shortId, timeAgo, usd } from "@/lib/format";
+import { SpanWaterfall, waterfallTotal } from "@/components/SpanWaterfall";
+import { StateLine } from "@/components/Marks";
+import { Entry, EmptyState, ErrorState, Figure, Loading, PageHeader } from "@/components/ui";
 
-export default function TracesPage() {
+function TracesInner() {
+  const params = useSearchParams();
+  const wanted = params.get("trace");
+
   const [traces, setTraces] = useState<TraceSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [minLatency, setMinLatency] = useState<string>("");
   const [status, setStatus] = useState<string>("");
   const [selected, setSelected] = useState<TraceDetail | null>(null);
   const [loadingTrace, setLoadingTrace] = useState(false);
+  const detailRef = useRef<HTMLDivElement | null>(null);
+  const opened = useRef(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -36,176 +43,127 @@ export default function TracesPage() {
     load();
   }, [load]);
 
-  const openTrace = async (id: string) => {
+  const openTrace = useCallback(async (id: string) => {
     setLoadingTrace(true);
     setSelected(null);
     try {
       setSelected(await api.getTrace(id));
+      detailRef.current?.scrollIntoView({ block: "start" });
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to load trace");
     } finally {
       setLoadingTrace(false);
     }
-  };
+  }, []);
+
+  // Open the trace named in the address (?trace=...), once.
+  useEffect(() => {
+    if (wanted && !opened.current) {
+      opened.current = true;
+      openTrace(wanted);
+    }
+  }, [wanted, openTrace]);
 
   return (
-    <div>
+    <>
       <PageHeader
         title="Trace Viewer"
-        subtitle="Every query persists its OpenTelemetry span tree. Click a trace to see the waterfall — where the milliseconds, tokens, and cost actually go."
-        actions={
-          <button
-            onClick={load}
-            className="flex items-center gap-2 rounded-lg border border-border bg-surface-container px-3 py-2 text-sm text-on-surface hover:border-primary/50"
-          >
-            <RefreshCw className="h-4 w-4" /> Refresh
-          </button>
-        }
+        subtitle="Every query persists its OpenTelemetry span tree. Open a trace to see its timeline: where the milliseconds, tokens and cost went."
+        actions={<button type="button" onClick={load} className="btn"><RefreshCw aria-hidden="true" /> Refresh</button>}
       />
 
-      <Card className="mb-6">
-        <div className="flex flex-wrap items-end gap-4">
-          <label className="text-xs text-on-surface-muted">
-            Min latency (ms)
-            <input
-              type="number"
-              value={minLatency}
-              onChange={(e) => setMinLatency(e.target.value)}
-              placeholder="0"
-              className="mt-1 block w-32 rounded-md border border-border bg-background px-2 py-1.5 font-mono text-sm text-on-surface"
-            />
-          </label>
-          <label className="text-xs text-on-surface-muted">
-            Status
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              className="mt-1 block w-32 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-on-surface"
-            >
-              <option value="">All</option>
-              <option value="ok">ok</option>
-              <option value="error">error</option>
-            </select>
-          </label>
-          <button
-            onClick={load}
-            className="rounded-lg bg-primary/20 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/30"
-          >
-            Apply
-          </button>
-        </div>
-      </Card>
+      <div className="cols">
+        <Entry kind="Traces" source="GET /api/v1/traces">
+          <div className="row" style={{ marginBottom: 16 }}>
+            <label className="field" style={{ width: 140 }}>
+              <span className="lab">Min latency (ms)</span>
+              <input type="number" className="input" value={minLatency} onChange={(e) => setMinLatency(e.target.value)} placeholder="0" />
+            </label>
+            <label className="field" style={{ width: 140 }}>
+              <span className="lab">Status</span>
+              <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}>
+                <option value="">All</option>
+                <option value="ok">ok</option>
+                <option value="error">error</option>
+              </select>
+            </label>
+          </div>
 
-      {error && (
-        <div className="mb-6">
-          <ErrorState message={error} />
-        </div>
-      )}
+          {error && <div style={{ marginBottom: 16 }}><ErrorState message={error} onRetry={load} /></div>}
 
-      {traces === null ? (
-        <Loading label="Loading traces…" />
-      ) : traces.length === 0 && !error ? (
-        <EmptyState
-          title="No traces yet"
-          hint="Run a query at POST /api/v1/query and it will appear here with its full span tree."
-        />
-      ) : (
-        <div className="grid gap-6 lg:grid-cols-[1fr_1.3fr]">
-          <Card className="overflow-hidden p-0">
-            <div className="max-h-[70vh] overflow-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-surface-container text-left text-xs text-on-surface-muted">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">Trace</th>
-                    <th className="px-3 py-3 font-medium">Duration</th>
-                    <th className="px-3 py-3 font-medium">Spans</th>
-                    <th className="px-3 py-3 font-medium">Cost</th>
-                    <th className="px-4 py-3 font-medium">Age</th>
-                  </tr>
+          {traces === null ? (
+            <Loading label="Loading traces" />
+          ) : traces.length === 0 && !error ? (
+            <EmptyState title="No traces match" hint="Ask a question in the Playground and its trace appears here, or loosen the filters above." />
+          ) : (
+            <div className="tab-wrap" style={{ maxHeight: "70vh", overflowY: "auto" }}>
+              <table className="tab">
+                <caption className="sr-only">Traces, newest first</caption>
+                <thead>
+                  <tr><th>Trace</th><th className="num">Duration</th><th className="num hide-sm">Spans</th><th>Recorded</th></tr>
                 </thead>
                 <tbody>
                   {traces.map((t) => (
-                    <tr
-                      key={t.id}
-                      onClick={() => openTrace(t.id)}
-                      className={`cursor-pointer border-t border-border hover:bg-surface-container-high ${
-                        selected?.id === t.id ? "bg-primary/10" : ""
-                      }`}
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs text-on-surface">
-                            {t.name ?? shortId(t.otel_trace_id)}
-                          </span>
-                          {t.status === "error" && (
-                            <Badge color="#ffb4ab">error</Badge>
-                          )}
-                        </div>
-                        <div className="font-mono text-[10px] text-on-surface-muted">
-                          {shortId(t.otel_trace_id, 16)}
-                        </div>
+                    <tr key={t.id} className={selected?.id === t.id ? "sel" : undefined} onClick={() => openTrace(t.id)} style={{ cursor: "pointer" }}>
+                      <td>
+                        <button type="button" className="row-btn" onClick={(e) => { e.stopPropagation(); openTrace(t.id); }} aria-pressed={selected?.id === t.id}>
+                          <span className="mono">{t.name ?? shortId(t.otel_trace_id)}</span>
+                          <span className="id">{shortId(t.otel_trace_id, 16)}</span>
+                        </button>
                       </td>
-                      <td className="px-3 py-3 font-mono text-xs text-on-surface">
-                        {ms(t.total_duration_ms)}
-                      </td>
-                      <td className="px-3 py-3 font-mono text-xs text-on-surface-muted">
-                        {t.span_count}
-                      </td>
-                      <td className="px-3 py-3 font-mono text-xs text-on-surface-muted">
-                        {usd(t.total_cost_usd)}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-on-surface-muted">
-                        {timeAgo(t.created_at)}
+                      <td className="num">{ms(t.total_duration_ms)}</td>
+                      <td className="num hide-sm">{t.span_count}</td>
+                      <td>
+                        {dateTime(t.created_at)}
+                        <span className="id">{timeAgo(t.created_at)}{t.status === "error" ? " · error" : ""}</span>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </Card>
+          )}
+        </Entry>
 
-          <Card>
-            {loadingTrace ? (
-              <Loading label="Loading span tree…" />
-            ) : selected ? (
-              <div>
-                <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1">
-                  <div>
-                    <div className="text-xs text-on-surface-muted">Trace</div>
-                    <div className="font-mono text-sm text-on-surface">
-                      {selected.name ?? shortId(selected.otel_trace_id)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-on-surface-muted">Duration</div>
-                    <div className="font-mono text-sm text-primary">
-                      {ms(selected.total_duration_ms)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-on-surface-muted">Tokens</div>
-                    <div className="font-mono text-sm text-on-surface">
-                      {num(selected.total_tokens)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-on-surface-muted">Cost</div>
-                    <div className="font-mono text-sm text-on-surface">
-                      {usd(selected.total_cost_usd)}
-                    </div>
-                  </div>
-                </div>
+        <div ref={detailRef} style={{ scrollMarginTop: 16 }}>
+          {loadingTrace ? (
+            <Entry kind="Trace"><Loading label="Loading the span tree" /></Entry>
+          ) : selected ? (
+            <Entry kind="Trace" date={selected.created_at} id={selected.id} title={<span className="mono">{selected.name ?? shortId(selected.otel_trace_id)}</span>}>
+              <dl className="deflist" style={{ marginBottom: 20 }}>
+                <dt>Duration</dt><dd>{ms(selected.total_duration_ms)}</dd>
+                <dt>Spans</dt><dd>{selected.span_count}</dd>
+                <dt>Tokens</dt><dd>{num(selected.total_tokens)}</dd>
+                <dt>Cost</dt><dd>{usd(selected.total_cost_usd)}</dd>
+                <dt>Status</dt><dd><StateLine kind={selected.status === "error" ? "down" : "ok"}>{selected.status}</StateLine></dd>
+                <dt>OpenTelemetry id</dt><dd style={{ overflowWrap: "anywhere" }}>{selected.otel_trace_id}</dd>
+              </dl>
+              <Figure
+                caption={
+                  <>
+                    <b>Span timeline.</b> {selected.spans.length} span{selected.spans.length === 1 ? "" : "s"} over {ms(waterfallTotal(selected.spans))}.
+                    Each bar starts where its span started and lasts as long as it ran; indentation shows the parent span. Select a span to read its attributes.
+                  </>
+                }
+              >
                 <SpanWaterfall spans={selected.spans} />
-              </div>
-            ) : (
-              <EmptyState
-                title="Select a trace"
-                hint="Pick a trace on the left to render its span waterfall."
-              />
-            )}
-          </Card>
+              </Figure>
+            </Entry>
+          ) : (
+            <Entry kind="Trace">
+              <EmptyState title="No trace open" hint="Pick a trace in the list to render its span timeline." />
+            </Entry>
+          )}
         </div>
-      )}
-    </div>
+      </div>
+    </>
+  );
+}
+
+export default function TracesPage() {
+  return (
+    <Suspense fallback={<Loading label="Loading" />}>
+      <TracesInner />
+    </Suspense>
   );
 }

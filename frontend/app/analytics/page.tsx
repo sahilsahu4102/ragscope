@@ -1,38 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Coins, Database, Gauge, Timer } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError } from "@/lib/api";
-import type {
-  CacheAnalytics,
-  CostAnalytics,
-  LatencyAnalytics,
-  ThroughputAnalytics,
-} from "@/lib/types";
-import { ms, num, pct, usd } from "@/lib/format";
-import { Card, ErrorState, Loading, PageHeader } from "@/components/ui";
-import { MetricCard } from "@/components/MetricCard";
+import type { CacheAnalytics, CostAnalytics, LatencyAnalytics, ThroughputAnalytics } from "@/lib/types";
+import { ageDays, dateTime, ms, num, pct, usd } from "@/lib/format";
+import { StateMark } from "@/components/Marks";
+import { Entry, ErrorState, Figure, Loading, PageHeader } from "@/components/ui";
 
-const tooltipStyle = {
-  background: "#141b26",
-  border: "1px solid #26313f",
-  borderRadius: 8,
-  fontSize: 12,
-};
-const axisTick = { fill: "#8fa0b0", fontSize: 10 };
+const WINDOWS = [
+  { value: 1, label: "Last 24 hours" },
+  { value: 7, label: "Last 7 days" },
+  { value: 30, label: "Last 30 days" },
+  { value: 90, label: "Last 90 days" },
+];
+
+const tooltipStyle = { background: "#fbf9f3", border: "1.5px solid #14182b", borderRadius: 0, fontSize: 12 };
+const tick = { fill: "#3a425a", fontSize: 11 };
+const GRID = "#cfd8ea";
 
 export default function AnalyticsPage() {
   const [days, setDays] = useState(7);
@@ -40,6 +25,7 @@ export default function AnalyticsPage() {
   const [cost, setCost] = useState<CostAnalytics | null>(null);
   const [cache, setCache] = useState<CacheAnalytics | null>(null);
   const [throughput, setThroughput] = useState<ThroughputAnalytics | null>(null);
+  const [newest, setNewest] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -47,16 +33,18 @@ export default function AnalyticsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [l, c, ca, t] = await Promise.all([
-        api.latency(days),
-        api.cost(days),
-        api.cache(days),
-        api.throughput(days),
-      ]);
+      const [l, c, ca, t] = await Promise.all([api.latency(days), api.cost(days), api.cache(days), api.throughput(days)]);
       setLatency(l);
       setCost(c);
       setCache(ca);
       setThroughput(t);
+      if (l.overall.count === 0) {
+        // Say why it is empty: how old is the newest trace the API holds?
+        const latest = await api.listTraces({ limit: 1 }).catch(() => []);
+        setNewest(latest[0]?.created_at ?? null);
+      } else {
+        setNewest(null);
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to load analytics");
     } finally {
@@ -68,202 +56,157 @@ export default function AnalyticsPage() {
     load();
   }, [load]);
 
+  const windowLabel = WINDOWS.find((w) => w.value === days)?.label.toLowerCase() ?? `last ${days} days`;
+  const count = latency?.overall.count ?? 0;
+
   return (
-    <div>
+    <>
       <PageHeader
         title="Cost & Latency Analytics"
-        subtitle="Aggregated from the persisted query history: latency percentiles, cost per model, cache efficiency, and throughput."
+        subtitle="Aggregated from the persisted query history: latency percentiles, cost per model, cache efficiency and throughput. The API reports at most the last 90 days."
         actions={
-          <select
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            className="rounded-lg border border-border bg-surface-container px-3 py-2 text-sm text-on-surface"
-          >
-            <option value={1}>Last 24h</option>
-            <option value={7}>Last 7 days</option>
-            <option value={30}>Last 30 days</option>
-            <option value={90}>Last 90 days</option>
-          </select>
+          <label className="field" style={{ width: 200 }}>
+            <span className="sr-only">Time window</span>
+            <select className="select" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+              {WINDOWS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+            </select>
+          </label>
         }
       />
 
-      {error && (
-        <div className="mb-6">
-          <ErrorState message={error} />
-        </div>
-      )}
+      {error && <div style={{ marginBottom: 24 }}><ErrorState message={error} onRetry={load} /></div>}
 
       {loading ? (
-        <Loading label="Loading analytics…" />
+        <Loading label="Loading analytics" />
       ) : (
-        <div className="space-y-6">
-          {/* KPI row */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricCard
-              label="p95 Latency"
-              value={ms(latency?.overall.p95 ?? null)}
-              sublabel={`${num(latency?.overall.count ?? 0)} queries`}
-              accent="secondary"
-              icon={<Timer className="h-4 w-4" />}
-            />
-            <MetricCard
-              label="Total Cost"
-              value={usd(cost?.total_cost_usd ?? 0)}
-              sublabel={`${num(cost?.total_tokens ?? 0)} tokens`}
-              accent="primary"
-              icon={<Coins className="h-4 w-4" />}
-            />
-            <MetricCard
-              label="Cache Hit Rate"
-              value={pct(cache?.hit_rate ?? 0)}
-              sublabel={`${num(cache?.hits ?? 0)} hits / ${num(cache?.misses ?? 0)} miss`}
-              accent="primary"
-              icon={<Database className="h-4 w-4" />}
-            />
-            <MetricCard
-              label="Throughput"
-              value={`${throughput?.total_queries ?? 0}`}
-              sublabel={`peak ${throughput?.peak_qps ?? 0} qps`}
-              accent="muted"
-              icon={<Gauge className="h-4 w-4" />}
-            />
+        <>
+          <Entry kind="Summary" source={`GET /api/v1/analytics, ${windowLabel}`}>
+            {count === 0 && (
+              <div className="note is-wait" style={{ marginBottom: 20 }}>
+                <StateMark kind="wait" />
+                <div>
+                  <b>No queries in the {windowLabel}</b>
+                  <p>
+                    {newest
+                      ? <>The newest trace in the database is {ageDays(newest)} days old ({dateTime(newest)}), which is {ageDays(newest) > 90 ? "outside the 90-day window the API reports on" : "outside this window"}. Ask a question in the Playground to produce fresh data.</>
+                      : <>No traces exist yet. Ask a question in the Playground to produce data.</>}
+                  </p>
+                </div>
+              </div>
+            )}
+            <div className="cols-even cols" style={{ gap: "8px 40px" }}>
+              <dl className="deflist">
+                <dt>Queries</dt><dd>{num(count)}</dd>
+                <dt>Latency p50</dt><dd>{ms(latency?.overall.p50 ?? null)}</dd>
+                <dt>Latency p95</dt><dd>{ms(latency?.overall.p95 ?? null)}</dd>
+                <dt>Latency p99</dt><dd>{ms(latency?.overall.p99 ?? null)}</dd>
+                <dt>Throughput</dt><dd>{num(throughput?.total_queries ?? 0)} {throughput?.total_queries === 1 ? "query" : "queries"}, peak {throughput?.peak_qps ?? 0} qps</dd>
+              </dl>
+              <dl className="deflist">
+                <dt>Total cost</dt><dd>{usd(cost?.total_cost_usd ?? 0)}</dd>
+                <dt>Tokens</dt><dd>{num(cost?.total_tokens ?? 0)}</dd>
+                <dt>Cost per query</dt><dd>{usd(cost?.avg_cost_per_query ?? 0)}</dd>
+                <dt>Cache</dt><dd>{num(cache?.hits ?? 0)} hits, {num(cache?.misses ?? 0)} misses, {pct(cache?.hit_rate ?? 0)}</dd>
+                <dt>Cache savings</dt><dd>{usd(cache?.estimated_savings_usd ?? 0)} estimated</dd>
+              </dl>
+            </div>
+          </Entry>
+
+          <Entry kind="Latency" source={`GET /api/v1/analytics/latency?days=${days}`}>
+            {latency && latency.series.length > 0 ? (
+              <Figure
+                caption={<><b>Latency percentiles per day</b> over the {windowLabel}, from {num(count)} {count === 1 ? "query" : "queries"}. The solid line is p50, the dashed line p95 and the dotted line p99.</>}
+              >
+                <div className="plot" style={{ height: 280 }} role="img" aria-label="Line chart of p50, p95 and p99 latency per day">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={latency.series} margin={{ top: 8, right: 12, bottom: 8, left: -8 }}>
+                      <CartesianGrid stroke={GRID} />
+                      <XAxis dataKey="bucket" tick={tick} />
+                      <YAxis tick={tick} />
+                      <Tooltip contentStyle={tooltipStyle} />
+                      <Line type="monotone" dataKey="p50" stroke="#14182b" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="p95" stroke="#2b5fb0" strokeWidth={2} strokeDasharray="7 4" dot={false} />
+                      <Line type="monotone" dataKey="p99" stroke="#8a5a10" strokeWidth={2} strokeDasharray="2 4" dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </Figure>
+            ) : (
+              <p className="lede">No latency data in the {windowLabel}.</p>
+            )}
+          </Entry>
+
+          <div className="cols-even cols">
+            <Entry kind="Cost over time" source={`GET /api/v1/analytics/cost?days=${days}`}>
+              {cost && cost.series.length > 0 ? (
+                <Figure caption={<><b>Cost per day</b> over the {windowLabel}, in US dollars, {num(cost.total_tokens)} tokens in total.</>}>
+                  <div className="plot" style={{ height: 240 }} role="img" aria-label="Line chart of cost per day">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={cost.series} margin={{ top: 8, right: 12, bottom: 8, left: -8 }}>
+                        <CartesianGrid stroke={GRID} />
+                        <XAxis dataKey="bucket" tick={tick} />
+                        <YAxis tick={tick} />
+                        <Tooltip contentStyle={tooltipStyle} />
+                        <Line type="monotone" dataKey="cost_usd" stroke="#14182b" strokeWidth={2} dot={{ r: 3, fill: "#14182b" }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </Figure>
+              ) : (
+                <p className="lede">No cost data in the {windowLabel}.</p>
+              )}
+            </Entry>
+
+            <Entry kind="Throughput" source={`GET /api/v1/analytics/throughput?days=${days}`}>
+              {throughput && throughput.series.length > 0 ? (
+                <Figure caption={<><b>Queries per day</b> over the {windowLabel}; {num(throughput.total_queries)} in total, average {throughput.avg_qps} qps.</>}>
+                  <div className="plot" style={{ height: 240 }} role="img" aria-label="Bar chart of queries per day">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={throughput.series} margin={{ top: 8, right: 12, bottom: 8, left: -8 }}>
+                        <CartesianGrid stroke={GRID} />
+                        <XAxis dataKey="bucket" tick={tick} />
+                        <YAxis tick={tick} />
+                        <Tooltip contentStyle={tooltipStyle} />
+                        <Bar dataKey="count" fill="#14182b" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </Figure>
+              ) : (
+                <p className="lede">No throughput data in the {windowLabel}.</p>
+              )}
+            </Entry>
           </div>
 
-          {/* Latency percentiles */}
-          <Card>
-            <h3 className="mb-4 font-semibold text-on-surface">
-              Latency percentiles (p50 / p95 / p99)
-            </h3>
-            {latency && latency.series.length > 0 ? (
-              <div className="h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={latency.series}
-                    margin={{ top: 8, right: 8, bottom: 8, left: -16 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#26313f" />
-                    <XAxis dataKey="bucket" tick={axisTick} />
-                    <YAxis tick={axisTick} />
-                    <Tooltip contentStyle={tooltipStyle} />
-                    <Line type="monotone" dataKey="p50" stroke="#4cd6fb" dot={false} />
-                    <Line type="monotone" dataKey="p95" stroke="#00d4aa" dot={false} />
-                    <Line type="monotone" dataKey="p99" stroke="#ffb77a" dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
+          <Entry kind="Cost by model" source={`GET /api/v1/analytics/cost?days=${days}`}>
+            {cost && cost.by_model.length > 0 ? (
+              <div className="tab-wrap">
+                <table className="tab">
+                  <caption className="sr-only">Cost by model</caption>
+                  <thead><tr><th>Model</th><th className="num">Queries</th><th className="num">Tokens</th><th className="num">Cost</th></tr></thead>
+                  <tbody>
+                    {cost.by_model.map((m) => (
+                      <tr key={m.model}>
+                        <td className="mono">{m.model}</td>
+                        <td className="num">{num(m.queries)}</td>
+                        <td className="num">{num(m.tokens)}</td>
+                        <td className="num">{usd(m.cost_usd)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             ) : (
-              <NoData />
-            )}
-          </Card>
-
-          <div className="grid gap-6 lg:grid-cols-2">
-            {/* Cost over time */}
-            <Card>
-              <h3 className="mb-4 font-semibold text-on-surface">Cost over time</h3>
-              {cost && cost.series.length > 0 ? (
-                <div className="h-56 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart
-                      data={cost.series}
-                      margin={{ top: 8, right: 8, bottom: 8, left: -16 }}
-                    >
-                      <defs>
-                        <linearGradient id="costFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#00d4aa" stopOpacity={0.5} />
-                          <stop offset="100%" stopColor="#00d4aa" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#26313f" />
-                      <XAxis dataKey="bucket" tick={axisTick} />
-                      <YAxis tick={axisTick} />
-                      <Tooltip contentStyle={tooltipStyle} />
-                      <Area
-                        type="monotone"
-                        dataKey="cost_usd"
-                        stroke="#00d4aa"
-                        fill="url(#costFill)"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <NoData />
-              )}
-            </Card>
-
-            {/* Throughput */}
-            <Card>
-              <h3 className="mb-4 font-semibold text-on-surface">
-                Throughput (queries / day)
-              </h3>
-              {throughput && throughput.series.length > 0 ? (
-                <div className="h-56 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={throughput.series}
-                      margin={{ top: 8, right: 8, bottom: 8, left: -16 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#26313f" />
-                      <XAxis dataKey="bucket" tick={axisTick} />
-                      <YAxis tick={axisTick} />
-                      <Tooltip contentStyle={tooltipStyle} />
-                      <Bar dataKey="count" fill="#00b4d8" radius={[3, 3, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <NoData />
-              )}
-            </Card>
-          </div>
-
-          {/* Cost by model */}
-          <Card>
-            <h3 className="mb-4 font-semibold text-on-surface">Cost by model</h3>
-            {cost && cost.by_model.length > 0 ? (
-              <table className="w-full text-sm">
-                <thead className="text-left text-xs text-on-surface-muted">
-                  <tr>
-                    <th className="py-2 font-medium">Model</th>
-                    <th className="py-2 font-medium">Queries</th>
-                    <th className="py-2 font-medium">Tokens</th>
-                    <th className="py-2 font-medium">Cost</th>
-                  </tr>
-                </thead>
-                <tbody className="font-mono text-xs">
-                  {cost.by_model.map((m) => (
-                    <tr key={m.model} className="border-t border-border">
-                      <td className="py-2 text-on-surface">{m.model}</td>
-                      <td className="py-2 text-on-surface-muted">{num(m.queries)}</td>
-                      <td className="py-2 text-on-surface-muted">{num(m.tokens)}</td>
-                      <td className="py-2 text-primary">{usd(m.cost_usd)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <NoData />
+              <p className="lede">No per-model cost in the {windowLabel}.</p>
             )}
             {cache && (
-              <p className="mt-4 text-xs text-on-surface-muted">
-                Estimated cache savings:{" "}
-                <span className="font-mono text-primary">
-                  {usd(cache.estimated_savings_usd)}
-                </span>{" "}
-                across {num(cache.hits)} hits (threshold {cache.threshold}).
+              <p className="lede" style={{ marginTop: 16 }}>
+                The semantic cache returns a stored answer when a past query is at least {cache.threshold} similar; entries live {Math.round(cache.ttl_seconds / 60)} minutes.
               </p>
             )}
-          </Card>
-        </div>
+          </Entry>
+        </>
       )}
-    </div>
-  );
-}
-
-function NoData() {
-  return (
-    <div className="flex h-40 items-center justify-center text-sm text-on-surface-muted">
-      No data in this window yet — run some queries.
-    </div>
+    </>
   );
 }

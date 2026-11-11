@@ -3,37 +3,13 @@
 import clsx from "clsx";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Check,
-  Copy,
-  CornerDownLeft,
-  Database,
-  Eraser,
-  Loader2,
-  Send,
-  ThumbsDown,
-  ThumbsUp,
-  X,
-  Zap,
-} from "lucide-react";
+import { Check, Copy, Eraser, Send, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { Citation, QueryResponse, QueryTransform } from "@/lib/types";
 import { ms, num, pct } from "@/lib/format";
-import {
-  EMPTY_FILTERS,
-  FiltersPanel,
-  toFilters,
-  type FilterState,
-} from "@/components/FiltersPanel";
-import {
-  Card,
-  ErrorState,
-  Field,
-  NumberInput,
-  PageHeader,
-  Select,
-  Toggle,
-} from "@/components/ui";
+import { EMPTY_FILTERS, FiltersPanel, toFilters, type FilterState } from "@/components/FiltersPanel";
+import { StateMark } from "@/components/Marks";
+import { Entry, EmptyState, ErrorState, Field, NumberInput, PageHeader, Select, Toggle } from "@/components/ui";
 
 const TRANSFORMS: readonly { value: QueryTransform; label: string }[] = [
   { value: "none", label: "None" },
@@ -58,16 +34,11 @@ interface Turn {
 /**
  * Rebuild which `[N]` marker maps to which entry of `citations`.
  *
- * The backend walks the answer's `[N]` refs in order, skips out-of-range ones,
- * dedupes, and appends the matching chunk — so citation order is first-appearance
- * order. We replay that here. If the reconstruction doesn't line up we return
- * null and render the markers as plain text rather than mislabel a source.
+ * The backend walks the answer's `[N]` refs in order, skips out-of-range ones, dedupes, and appends the
+ * matching chunk, so citation order is first-appearance order. We replay that here. If the reconstruction
+ * doesn't line up we return null and render the markers as plain text rather than mislabel a source.
  */
-function buildCitationMap(
-  answer: string,
-  citations: Citation[],
-  topK: number,
-): Map<number, number> | null {
+function buildCitationMap(answer: string, citations: Citation[], topK: number): Map<number, number> | null {
   const seen = new Set<number>();
   const order: number[] = [];
   for (const m of answer.matchAll(/\[(\d+)\]/g)) {
@@ -94,7 +65,7 @@ function AnswerText({
 }) {
   const parts = answer.split(/(\[\d+\])/g);
   return (
-    <div className="whitespace-pre-wrap text-sm leading-relaxed text-on-surface">
+    <div className="answer">
       {parts.map((part, i) => {
         const match = /^\[(\d+)\]$/.exec(part);
         if (!match) return <span key={i}>{part}</span>;
@@ -102,23 +73,17 @@ function AnswerText({
         const refNum = Number(match[1]);
         const citationIndex = citationMap?.get(refNum);
         if (citationIndex === undefined) {
-          return (
-            <span key={i} className="font-mono text-xs text-on-surface-muted">
-              {part}
-            </span>
-          );
+          return <span key={i} className="mono" style={{ color: "var(--ink-3)" }}>{part}</span>;
         }
         return (
           <button
             key={i}
+            type="button"
             onClick={() => onCiteClick(citationIndex)}
             title="Show this source"
-            className={clsx(
-              "mx-0.5 rounded px-1 align-baseline font-mono text-[11px] transition-colors",
-              activeCitation === citationIndex
-                ? "bg-primary text-background"
-                : "bg-primary/15 text-primary hover:bg-primary/30",
-            )}
+            aria-label={`Source ${refNum}`}
+            aria-pressed={activeCitation === citationIndex}
+            className={clsx("cite", activeCitation === citationIndex && "is-on")}
           >
             {refNum}
           </button>
@@ -128,75 +93,33 @@ function AnswerText({
   );
 }
 
-function CitationList({
-  citations,
-  active,
-  onSelect,
-}: {
-  citations: Citation[];
-  active: number | null;
-  onSelect: (i: number | null) => void;
-}) {
+function CitationList({ citations, active, onSelect }: { citations: Citation[]; active: number | null; onSelect: (i: number | null) => void }) {
   if (citations.length === 0) {
     return (
-      <div className="mt-3 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-on-surface-muted">
-        The model returned no <span className="font-mono">[N]</span> citations
-        for this answer.
-      </div>
+      <p className="lede" style={{ marginTop: 16 }}>
+        The model returned no <code>[N]</code> citations for this answer.
+      </p>
     );
   }
   return (
-    <div className="mt-3 space-y-1.5">
-      <div className="text-[10px] uppercase tracking-widest text-on-surface-muted">
-        Sources · {citations.length}
+    <div style={{ marginTop: 20 }}>
+      <div className="lab" style={{ marginBottom: 4 }}>Sources, {citations.length}</div>
+      <div style={{ borderTop: "2px solid var(--ink)" }}>
+        {citations.map((c, i) => {
+          const open = active === i;
+          return (
+            <button key={`${c.chunk_id}-${i}`} type="button" onClick={() => onSelect(open ? null : i)} aria-expanded={open} className="source">
+              <span className="flex flex-wrap items-baseline gap-x-3">
+                <span className={clsx("cite", open && "is-on")} style={{ margin: 0 }}>{i + 1}</span>
+                <b>{c.document_name}</b>
+                {c.page_number != null && <span className="mono" style={{ color: "var(--ink-3)" }}>p. {c.page_number}</span>}
+                <span className="mono" style={{ marginLeft: "auto", color: "var(--ink-3)" }}>score {c.score.toFixed(3)}</span>
+              </span>
+              <span className={clsx("snip", !open && "clamp")} style={{ display: open ? "block" : undefined }}>{c.content_snippet}</span>
+            </button>
+          );
+        })}
       </div>
-      {citations.map((c, i) => {
-        const open = active === i;
-        return (
-          <button
-            key={`${c.chunk_id}-${i}`}
-            onClick={() => onSelect(open ? null : i)}
-            className={clsx(
-              "block w-full rounded-lg border px-3 py-2 text-left transition-colors",
-              open
-                ? "border-primary/50 bg-primary/10"
-                : "border-border bg-background/40 hover:border-border hover:bg-surface-container-high",
-            )}
-          >
-            <div className="flex items-center gap-2">
-              <span
-                className={clsx(
-                  "rounded px-1.5 font-mono text-[10px]",
-                  open
-                    ? "bg-primary text-background"
-                    : "bg-primary/15 text-primary",
-                )}
-              >
-                {i + 1}
-              </span>
-              <span className="truncate text-xs text-on-surface">
-                {c.document_name}
-              </span>
-              {c.page_number != null && (
-                <span className="shrink-0 font-mono text-[10px] text-on-surface-muted">
-                  p.{c.page_number}
-                </span>
-              )}
-              <span className="ml-auto shrink-0 font-mono text-[10px] text-on-surface-muted">
-                {c.score.toFixed(3)}
-              </span>
-            </div>
-            <p
-              className={clsx(
-                "mt-1 text-[11px] leading-relaxed text-on-surface-muted",
-                !open && "line-clamp-2",
-              )}
-            >
-              {c.content_snippet}
-            </p>
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -205,20 +128,17 @@ function TraceId({ id }: { id: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
+      type="button"
       onClick={() => {
         navigator.clipboard?.writeText(id);
         setCopied(true);
         setTimeout(() => setCopied(false), 1200);
       }}
       title="Copy trace id"
-      className="flex items-center gap-1 font-mono text-[10px] text-on-surface-muted hover:text-on-surface"
+      className="btn btn-sm"
     >
-      {copied ? (
-        <Check className="h-3 w-3 text-primary" />
-      ) : (
-        <Copy className="h-3 w-3" />
-      )}
-      {id.slice(0, 16)}
+      {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+      <span className="mono">{id.slice(0, 16)}</span>
     </button>
   );
 }
@@ -269,23 +189,11 @@ export default function PlaygroundPage() {
     abortRef.current = controller;
 
     const finish = (patch: Partial<Turn>) =>
-      setTurns((prev) =>
-        prev.map((t) =>
-          t.id === id ? { ...t, elapsedMs: Date.now() - startedAt, ...patch } : t,
-        ),
-      );
+      setTurns((prev) => prev.map((t) => (t.id === id ? { ...t, elapsedMs: Date.now() - startedAt, ...patch } : t)));
 
     try {
       const response = await api.query(
-        {
-          question: q,
-          top_k: parsedTopK,
-          use_hybrid: useHybrid,
-          use_reranker: useReranker,
-          use_cache: useCache,
-          query_transform: transform,
-          filters: toFilters(filters),
-        },
+        { question: q, top_k: parsedTopK, use_hybrid: useHybrid, use_reranker: useReranker, use_cache: useCache, query_transform: transform, filters: toFilters(filters) },
         controller.signal,
       );
       finish({ status: "done", response });
@@ -301,304 +209,131 @@ export default function PlaygroundPage() {
       abortRef.current = null;
       setBusy(false);
     }
-  }, [
-    question,
-    busy,
-    parsedTopK,
-    useHybrid,
-    useReranker,
-    useCache,
-    transform,
-    filters,
-  ]);
+  }, [question, busy, parsedTopK, useHybrid, useReranker, useCache, transform, filters]);
 
   const rate = async (turn: Turn, rating: 1 | -1) => {
     if (!turn.response) return;
-    setTurns((prev) =>
-      prev.map((t) =>
-        t.id === turn.id ? { ...t, feedback: rating, feedbackError: undefined } : t,
-      ),
-    );
+    setTurns((prev) => prev.map((t) => (t.id === turn.id ? { ...t, feedback: rating, feedbackError: undefined } : t)));
     try {
       await api.submitFeedback({ trace_id: turn.response.trace_id, rating });
     } catch (e) {
       setTurns((prev) =>
         prev.map((t) =>
-          t.id === turn.id
-            ? {
-                ...t,
-                feedback: undefined,
-                feedbackError:
-                  e instanceof ApiError ? e.message : "Feedback failed",
-              }
-            : t,
+          t.id === turn.id ? { ...t, feedback: undefined, feedbackError: e instanceof ApiError ? e.message : "Feedback failed" } : t,
         ),
       );
     }
   };
 
   return (
-    <div>
+    <>
       <PageHeader
         title="Playground"
-        subtitle="Ask a question against your ingested documents. Every answer is grounded, cited, and traced — flip the pipeline switches to feel the difference."
+        subtitle="Ask a question against your ingested documents. Every answer is grounded, cited and traced; change the pipeline settings to see the difference."
         actions={
-          turns.length > 0 && (
-            <button
-              onClick={() => setTurns([])}
-              disabled={busy}
-              className="flex items-center gap-2 rounded-lg border border-border bg-surface-container px-3 py-2 text-sm text-on-surface hover:border-primary/50 disabled:opacity-50"
-            >
-              <Eraser className="h-4 w-4" /> Clear
-            </button>
-          )
+          turns.length > 0 ? (
+            <button type="button" onClick={() => setTurns([])} disabled={busy} className="btn"><Eraser aria-hidden="true" /> Clear</button>
+          ) : undefined
         }
       />
 
-      {/* ── Pipeline config ── */}
-      <Card className="mb-6">
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
-          <Field label="Top K" className="w-20">
-            <NumberInput
-              value={topK}
-              onChange={setTopK}
-              min={1}
-              max={50}
-              disabled={busy}
-            />
-          </Field>
-          <Field label="Query transform" className="w-40">
-            <Select
-              value={transform}
-              onChange={setTransform}
-              options={TRANSFORMS}
-              disabled={busy}
-            />
-          </Field>
-          <div className="flex flex-wrap items-center gap-2 pb-0.5">
-            <Toggle
-              label="Hybrid + RRF"
-              checked={useHybrid}
-              onChange={setUseHybrid}
-              disabled={busy}
-              title="Fuse dense (pgvector) and sparse (BM25) results with reciprocal rank fusion"
-            />
-            <Toggle
-              label="Reranker"
-              checked={useReranker}
-              onChange={setUseReranker}
-              disabled={busy}
-              title="Rerank candidates with the LLM cross-encoder before generation"
-            />
-            <Toggle
-              label="Semantic cache"
-              checked={useCache}
-              onChange={setUseCache}
-              disabled={busy}
-              title="Return a cached answer when a past query is semantically close enough"
-            />
+      <Entry kind="Pipeline" source="POST /api/v1/query">
+        <div className="stack">
+          <div className="row">
+            <Field label="Top K" className="w-20"><NumberInput value={topK} onChange={setTopK} min={1} max={50} disabled={busy} /></Field>
+            <Field label="Query transform" className="w-40"><Select value={transform} onChange={setTransform} options={TRANSFORMS} disabled={busy} /></Field>
+            <div className="flex flex-wrap items-center gap-2" style={{ paddingBottom: 2 }}>
+              <Toggle label="Hybrid + RRF" checked={useHybrid} onChange={setUseHybrid} disabled={busy} title="Fuse dense (pgvector) and sparse (BM25) results with reciprocal rank fusion" />
+              <Toggle label="Reranker" checked={useReranker} onChange={setUseReranker} disabled={busy} title="Rerank candidates with the cross-encoder before generation" />
+              <Toggle label="Semantic cache" checked={useCache} onChange={setUseCache} disabled={busy} title="Return a cached answer when a past query is semantically close enough" />
+            </div>
           </div>
-        </div>
-        <div className="mt-4">
           <FiltersPanel value={filters} onChange={setFilters} disabled={busy} />
         </div>
-      </Card>
+      </Entry>
 
-      {/* ── Conversation ── */}
       {turns.length === 0 ? (
-        <Card className="border-dashed">
-          <div className="flex flex-col items-center gap-3 py-10 text-center">
-            <Database className="h-8 w-8 text-on-surface-muted" />
-            <div className="text-sm font-medium text-on-surface">
-              Ask your first question
-            </div>
-            <p className="max-w-md text-xs text-on-surface-muted">
-              This hits{" "}
-              <span className="font-mono text-on-surface">POST /api/v1/query</span>{" "}
-              — the real pipeline. You need at least one ingested document; upload
-              one with{" "}
-              <span className="font-mono text-on-surface">POST /api/v1/ingest</span>{" "}
-              first.
-            </p>
-          </div>
-        </Card>
+        <EmptyState
+          title="Ask your first question"
+          hint={<>This calls <code>POST /api/v1/query</code>, the real pipeline. You need at least one ingested document; add one on the <Link href="/documents" style={{ fontWeight: 700 }}>Documents</Link> page.</>}
+        />
       ) : (
-        <div className="space-y-6">
+        <div>
           {turns.map((turn) => (
-            <div key={turn.id}>
-              {/* Question */}
-              <div className="mb-3 flex justify-end">
-                <div className="max-w-2xl rounded-xl rounded-br-sm border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm text-on-surface">
-                  {turn.question}
+            <Entry key={turn.id} kind="Question" date={turn.startedAt} id={turn.response?.trace_id} title={turn.question}>
+              {turn.status === "pending" ? (
+                <div className="note is-wait" role="status">
+                  <StateMark kind="wait" />
+                  <p>
+                    Running the pipeline{useHybrid ? ", hybrid" : ", dense"}{useReranker ? ", rerank" : ""}{transform !== "none" ? `, ${transform}` : ""}.{" "}
+                    <span className="mono">{((Date.now() - turn.startedAt) / 1000).toFixed(1)} s</span>
+                    <span className="sr-only">{tick}</span>
+                  </p>
                 </div>
-              </div>
-
-              {/* Answer */}
-              <Card>
-                {turn.status === "pending" ? (
-                  <div className="flex items-center gap-3 text-sm text-on-surface-muted">
-                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                    <span>
-                      Running pipeline
-                      {useHybrid ? " · hybrid" : " · dense"}
-                      {useReranker ? " · rerank" : ""}
-                      {transform !== "none" ? ` · ${transform}` : ""}
-                    </span>
-                    <span className="ml-auto font-mono text-xs text-on-surface">
-                      {((Date.now() - turn.startedAt) / 1000).toFixed(1)}s
-                      <span className="hidden">{tick}</span>
-                    </span>
-                  </div>
-                ) : turn.status === "cancelled" ? (
-                  <div className="text-sm text-on-surface-muted">
-                    Cancelled after {ms(turn.elapsedMs)}.
-                  </div>
-                ) : turn.status === "error" ? (
+              ) : turn.status === "cancelled" ? (
+                <p className="lede">Cancelled after {ms(turn.elapsedMs)}.</p>
+              ) : turn.status === "error" ? (
+                <ErrorState message={turn.error ?? "Query failed"}>
+                  {turn.errorStatus === 404 && <p>No chunks matched. Either nothing has been ingested yet, or your metadata filters excluded everything: try clearing them or lowering the minimum score.</p>}
+                  {turn.errorStatus === 400 && <p>Blocked by the input guardrails before reaching the pipeline.</p>}
+                  {turn.errorStatus === 0 && <p>Start the stack with <code>docker compose up -d</code> and confirm <code>/readyz</code> on the API reports ready.</p>}
+                </ErrorState>
+              ) : (
+                turn.response && (
                   <div>
-                    <ErrorState message={turn.error ?? "Query failed"} />
-                    {turn.errorStatus === 404 && (
-                      <p className="mt-3 text-xs text-on-surface-muted">
-                        No chunks matched. Either nothing has been ingested yet, or
-                        your metadata filters excluded everything — try clearing
-                        them or lowering <span className="font-mono">min score</span>.
-                      </p>
-                    )}
-                    {turn.errorStatus === 400 && (
-                      <p className="mt-3 text-xs text-on-surface-muted">
-                        Blocked by the input guardrails before reaching the
-                        pipeline.
-                      </p>
-                    )}
-                    {turn.errorStatus === 0 && (
-                      <p className="mt-3 text-xs text-on-surface-muted">
-                        Start the stack with{" "}
-                        <span className="font-mono text-on-surface">make dev</span>{" "}
-                        and confirm{" "}
-                        <span className="font-mono text-on-surface">
-                          localhost:8000/readyz
-                        </span>{" "}
-                        reports ready.
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  turn.response && (
-                    <div>
-                      {/* Meta strip */}
-                      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border pb-3 text-[11px] text-on-surface-muted">
-                        <span className="font-mono text-primary">
-                          {ms(turn.response.latency_ms)}
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2" style={{ marginBottom: 16, fontSize: "0.875rem", color: "var(--ink-2)" }}>
+                      <span><b className="mono" style={{ color: "var(--ink)" }}>{ms(turn.response.latency_ms)}</b> to answer</span>
+                      {turn.response.tokens_used != null && <span className="mono">{num(turn.response.tokens_used)} tokens</span>}
+                      {turn.response.cached && (
+                        <span className="chip is-on">
+                          cache hit{turn.response.cache_similarity != null && `, ${pct(turn.response.cache_similarity, 1)} similar`}
                         </span>
-                        {turn.response.tokens_used != null && (
-                          <span className="font-mono">
-                            {num(turn.response.tokens_used)} tokens
-                          </span>
-                        )}
-                        {turn.response.cached && (
-                          <span className="flex items-center gap-1 rounded bg-secondary/15 px-1.5 py-0.5 font-mono text-[10px] text-secondary">
-                            <Zap className="h-3 w-3" />
-                            cache hit
-                            {turn.response.cache_similarity != null &&
-                              ` · ${pct(turn.response.cache_similarity, 1)}`}
-                          </span>
-                        )}
-                        <div className="ml-auto flex items-center gap-3">
-                          <TraceId id={turn.response.trace_id} />
-                          <Link
-                            href="/traces"
-                            className="text-[10px] text-on-surface-muted underline-offset-2 hover:text-primary hover:underline"
-                          >
-                            traces →
-                          </Link>
-                        </div>
-                      </div>
-
-                      <AnswerText
-                        answer={turn.response.answer}
-                        citationMap={buildCitationMap(
-                          turn.response.answer,
-                          turn.response.citations,
-                          parsedTopK,
-                        )}
-                        activeCitation={
-                          activeCitation?.startsWith(`${turn.id}:`)
-                            ? Number(activeCitation.split(":")[1])
-                            : null
-                        }
-                        onCiteClick={(i) =>
-                          setActiveCitation((cur) =>
-                            cur === `${turn.id}:${i}` ? null : `${turn.id}:${i}`,
-                          )
-                        }
-                      />
-
-                      <CitationList
-                        citations={turn.response.citations}
-                        active={
-                          activeCitation?.startsWith(`${turn.id}:`)
-                            ? Number(activeCitation.split(":")[1])
-                            : null
-                        }
-                        onSelect={(i) =>
-                          setActiveCitation(i === null ? null : `${turn.id}:${i}`)
-                        }
-                      />
-
-                      {/* Feedback */}
-                      <div className="mt-4 flex items-center gap-2 border-t border-border pt-3">
-                        <span className="text-[11px] text-on-surface-muted">
-                          Was this answer useful?
-                        </span>
-                        <button
-                          onClick={() => rate(turn, 1)}
-                          className={clsx(
-                            "rounded p-1.5 transition-colors",
-                            turn.feedback === 1
-                              ? "bg-primary/20 text-primary"
-                              : "text-on-surface-muted hover:bg-surface-container-high hover:text-on-surface",
-                          )}
-                          title="Thumbs up"
-                        >
-                          <ThumbsUp className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={() => rate(turn, -1)}
-                          className={clsx(
-                            "rounded p-1.5 transition-colors",
-                            turn.feedback === -1
-                              ? "bg-danger/20 text-danger"
-                              : "text-on-surface-muted hover:bg-surface-container-high hover:text-on-surface",
-                          )}
-                          title="Thumbs down"
-                        >
-                          <ThumbsDown className="h-3.5 w-3.5" />
-                        </button>
-                        {turn.feedback && !turn.feedbackError && (
-                          <span className="text-[11px] text-on-surface-muted">
-                            Recorded.
-                          </span>
-                        )}
-                        {turn.feedbackError && (
-                          <span className="text-[11px] text-danger">
-                            {turn.feedbackError}
-                          </span>
-                        )}
-                      </div>
+                      )}
+                      <span className="flex items-center gap-2" style={{ marginLeft: "auto" }}>
+                        <TraceId id={turn.response.trace_id} />
+                        <Link href="/traces" className="btn btn-sm">All traces</Link>
+                      </span>
                     </div>
-                  )
-                )}
-              </Card>
-            </div>
+
+                    <AnswerText
+                      answer={turn.response.answer}
+                      citationMap={buildCitationMap(turn.response.answer, turn.response.citations, parsedTopK)}
+                      activeCitation={activeCitation?.startsWith(`${turn.id}:`) ? Number(activeCitation.split(":")[1]) : null}
+                      onCiteClick={(i) => setActiveCitation((cur) => (cur === `${turn.id}:${i}` ? null : `${turn.id}:${i}`))}
+                    />
+
+                    <CitationList
+                      citations={turn.response.citations}
+                      active={activeCitation?.startsWith(`${turn.id}:`) ? Number(activeCitation.split(":")[1]) : null}
+                      onSelect={(i) => setActiveCitation(i === null ? null : `${turn.id}:${i}`)}
+                    />
+
+                    <div className="flex flex-wrap items-center gap-2" style={{ marginTop: 20 }}>
+                      <span style={{ fontSize: "0.875rem", color: "var(--ink-2)" }}>Was this answer useful?</span>
+                      <button type="button" className="btn btn-sm" aria-pressed={turn.feedback === 1} onClick={() => rate(turn, 1)} title="Thumbs up" aria-label="Thumbs up" style={turn.feedback === 1 ? { background: "var(--ink)", color: "var(--paper)" } : undefined}>
+                        <ThumbsUp aria-hidden="true" />
+                      </button>
+                      <button type="button" className="btn btn-sm" aria-pressed={turn.feedback === -1} onClick={() => rate(turn, -1)} title="Thumbs down" aria-label="Thumbs down" style={turn.feedback === -1 ? { background: "var(--ink)", color: "var(--paper)" } : undefined}>
+                        <ThumbsDown aria-hidden="true" />
+                      </button>
+                      {turn.feedback && !turn.feedbackError && <span style={{ fontSize: "0.875rem" }} role="status">Recorded.</span>}
+                      {turn.feedbackError && <span style={{ fontSize: "0.875rem", color: "var(--red)", fontWeight: 600 }} role="alert">{turn.feedbackError}</span>}
+                    </div>
+                  </div>
+                )
+              )}
+            </Entry>
           ))}
-          <div ref={bottomRef} />
+          <div ref={bottomRef} style={{ scrollMarginBottom: 170 }} />
         </div>
       )}
 
-      {/* ── Composer ── */}
-      <div className="sticky bottom-4 mt-6">
-        <Card className="glass">
-          <div className="flex items-end gap-3">
+      <div className="composer">
+        <div className="flex items-end gap-3">
+          <label className="field" style={{ flex: 1 }}>
+            <span className="sr-only">Your question</span>
             <textarea
+              className="textarea"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={(e) => {
@@ -608,32 +343,17 @@ export default function PlaygroundPage() {
                 }
               }}
               rows={2}
-              placeholder="Ask a question about your ingested documents…"
-              className="flex-1 resize-none bg-transparent text-sm text-on-surface outline-none placeholder:text-on-surface-muted"
+              placeholder="Ask a question about your ingested documents"
             />
-            {busy ? (
-              <button
-                onClick={() => abortRef.current?.abort()}
-                className="flex items-center gap-2 rounded-lg border border-border bg-surface-container px-4 py-2 text-sm text-on-surface hover:border-danger/50 hover:text-danger"
-              >
-                <X className="h-4 w-4" /> Cancel
-              </button>
-            ) : (
-              <button
-                onClick={send}
-                disabled={!question.trim()}
-                className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:opacity-40"
-              >
-                <Send className="h-4 w-4" /> Ask
-              </button>
-            )}
-          </div>
-          <div className="mt-2 flex items-center gap-1 text-[10px] text-on-surface-muted">
-            <CornerDownLeft className="h-3 w-3" /> Enter to send · Shift+Enter for
-            a new line
-          </div>
-        </Card>
+          </label>
+          {busy ? (
+            <button type="button" onClick={() => abortRef.current?.abort()} className="btn btn-danger"><X aria-hidden="true" /> Cancel</button>
+          ) : (
+            <button type="button" onClick={send} disabled={!question.trim()} className="btn btn-primary"><Send aria-hidden="true" /> Ask</button>
+          )}
+        </div>
+        <p style={{ marginTop: 6, fontSize: "0.75rem", color: "var(--ink-3)" }}>Enter to send, Shift+Enter for a new line.</p>
       </div>
-    </div>
+    </>
   );
 }

@@ -1,6 +1,7 @@
 import clsx from "clsx";
-import { AlertTriangle, Inbox, Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
+import { dateTime, shortId } from "@/lib/format";
+import { StateMark } from "./Marks";
 
 export function PageHeader({
   title,
@@ -8,75 +9,113 @@ export function PageHeader({
   actions,
 }: {
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   actions?: ReactNode;
 }) {
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-on-surface">
-          {title}
-        </h1>
-        {subtitle && (
-          <p className="mt-1 max-w-2xl text-sm text-on-surface-muted">
-            {subtitle}
-          </p>
-        )}
+    <div className="page-head">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <h1>{title}</h1>
+        {actions}
       </div>
-      {actions}
+      {subtitle && <p className="lede">{subtitle}</p>}
     </div>
   );
 }
 
-export function Card({
+/**
+ * A notebook entry: a header strip with the record kind, its real date and short id (or the endpoint it was
+ * read from), the body, and a witness footer naming the full id. Nothing here is typed in by hand.
+ */
+export function Entry({
+  kind,
+  date,
+  id,
+  source,
+  actions,
+  title,
   children,
   className,
 }: {
+  kind: string;
+  date?: string | number | Date | null;
+  id?: string;
+  /** For entries that summarise live state rather than one record, e.g. "GET /readyz". */
+  source?: string;
+  actions?: ReactNode;
+  title?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
   return (
-    <div
-      className={clsx(
-        "rounded-xl border border-border bg-surface-container/40 p-5",
-        className,
-      )}
-    >
-      {children}
-    </div>
+    <section className={clsx("entry", className)}>
+      <header className="entry-head">
+        <span className="kind">{kind}</span>
+        {date != null && <time dateTime={new Date(date).toISOString()}>{dateTime(date)}</time>}
+        {id && <code title={id}>{shortId(id, 8)}</code>}
+        {source && <code>{source}</code>}
+        {actions && <span className="actions">{actions}</span>}
+      </header>
+      <div className="entry-body">
+        {title && <h2 className="entry-title">{title}</h2>}
+        {children}
+      </div>
+      {id && <footer className="witness">Recorded by the RAGScope API. {kind} id <code>{id}</code></footer>}
+    </section>
   );
 }
 
-export function Loading({ label = "Loading…" }: { label?: string }) {
+/** A figure with a caption written from the data it shows. */
+export function Figure({ children, caption }: { children: ReactNode; caption: ReactNode }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-container/40 p-8 text-on-surface-muted">
-      <Loader2 className="h-5 w-5 animate-spin text-primary" />
-      <span className="text-sm">{label}</span>
+    <figure className="figure">
+      {children}
+      <figcaption>{caption}</figcaption>
+    </figure>
+  );
+}
+
+export function Loading({ label = "Loading" }: { label?: string }) {
+  return (
+    <div className="note is-wait" role="status">
+      <StateMark kind="wait" />
+      <p>{label}…</p>
     </div>
   );
 }
 
-export function EmptyState({
-  title,
-  hint,
+export function EmptyState({ title, hint }: { title: string; hint?: ReactNode }) {
+  return (
+    <div className="empty">
+      <b>{title}</b>
+      {hint && <p>{hint}</p>}
+    </div>
+  );
+}
+
+export function ErrorState({
+  message,
+  onRetry,
+  children,
 }: {
-  title: string;
-  hint?: string;
+  message: string;
+  onRetry?: () => void;
+  children?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border bg-surface-container/20 p-10 text-center">
-      <Inbox className="h-8 w-8 text-on-surface-muted" />
-      <div className="text-sm font-medium text-on-surface">{title}</div>
-      {hint && <div className="max-w-md text-xs text-on-surface-muted">{hint}</div>}
-    </div>
-  );
-}
-
-export function ErrorState({ message }: { message: string }) {
-  return (
-    <div className="flex items-start gap-3 rounded-xl border border-danger/40 bg-danger/10 p-5 text-danger">
-      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-      <div className="text-sm">{message}</div>
+    <div className="note is-error" role="alert">
+      <StateMark kind="down" />
+      <div>
+        <b>{message}</b>
+        {children}
+        {onRetry && (
+          <div>
+            <button type="button" className="btn btn-sm" onClick={onRetry}>
+              Try again
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -94,20 +133,13 @@ export function Field({
   className?: string;
 }) {
   return (
-    <label className={clsx("block", className)}>
-      <span className="text-xs text-on-surface-muted">{label}</span>
+    <label className={clsx("field", className)}>
+      <span className="lab">{label}</span>
       {children}
-      {hint && (
-        <span className="mt-1 block text-[10px] text-on-surface-muted">
-          {hint}
-        </span>
-      )}
+      {hint && <span className="hint">{hint}</span>}
     </label>
   );
 }
-
-const INPUT_CLASS =
-  "mt-1 block w-full rounded-md border border-border bg-background px-2 py-1.5 font-mono text-sm text-on-surface outline-none focus:border-primary/60 disabled:opacity-50";
 
 export function NumberInput({
   value,
@@ -136,7 +168,7 @@ export function NumberInput({
       placeholder={placeholder}
       disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
-      className={INPUT_CLASS}
+      className="input"
     />
   );
 }
@@ -161,7 +193,7 @@ export function TextInput({
       placeholder={placeholder}
       disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
-      className={INPUT_CLASS}
+      className="input"
     />
   );
 }
@@ -171,18 +203,21 @@ export function Select<T extends string>({
   onChange,
   options,
   disabled,
+  label,
 }: {
   value: T;
   onChange: (v: T) => void;
   options: readonly { value: T; label: string }[];
   disabled?: boolean;
+  label?: string;
 }) {
   return (
     <select
       value={value}
       disabled={disabled}
+      aria-label={label}
       onChange={(e) => onChange(e.target.value as T)}
-      className={clsx(INPUT_CLASS, "font-sans")}
+      className="select"
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>
@@ -193,7 +228,7 @@ export function Select<T extends string>({
   );
 }
 
-/** Pill-style on/off switch — used for hybrid / reranker / cache toggles. */
+/** On/off switch for the pipeline options: a drawn mark plus the label, pressed = filled. */
 export function Toggle({
   label,
   checked,
@@ -214,40 +249,15 @@ export function Toggle({
       disabled={disabled}
       aria-pressed={checked}
       onClick={() => onChange(!checked)}
-      className={clsx(
-        "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition-colors disabled:opacity-50",
-        checked
-          ? "border-primary/50 bg-primary/15 text-primary"
-          : "border-border bg-surface-container text-on-surface-muted hover:border-border hover:text-on-surface",
-      )}
+      className="toggle"
     >
-      <span
-        className={clsx(
-          "h-1.5 w-1.5 rounded-full",
-          checked ? "bg-primary" : "bg-on-surface-muted/50",
-        )}
-      />
+      <StateMark kind={checked ? "ok" : "off"} />
       {label}
+      <span className="sr-only">{checked ? "on" : "off"}</span>
     </button>
   );
 }
 
-export function Badge({
-  children,
-  color,
-}: {
-  children: ReactNode;
-  color?: string;
-}) {
-  return (
-    <span
-      className="rounded px-1.5 py-0.5 font-mono text-[10px] font-medium"
-      style={{
-        backgroundColor: color ? `${color}22` : "#26313f",
-        color: color ?? "#8fa0b0",
-      }}
-    >
-      {children}
-    </span>
-  );
+export function Chip({ children, tone }: { children: ReactNode; tone?: "on" | "red" }) {
+  return <span className={clsx("chip", tone === "on" && "is-on", tone === "red" && "is-red")}>{children}</span>;
 }

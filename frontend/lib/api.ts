@@ -21,6 +21,9 @@ import type {
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 
+/** The API host without its /api/v1 path: /healthz and /readyz live here. */
+export const ROOT_URL = BASE_URL.replace(/\/api\/v1\/?$/, "");
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {

@@ -1,34 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import {
-  ArrowDown,
-  ArrowUp,
-  Minus,
-  Play,
-  RefreshCw,
-} from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Play, RefreshCw } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError } from "@/lib/api";
 import type { Dataset, Experiment, MetricDelta } from "@/lib/types";
-import { timeAgo } from "@/lib/format";
-import {
-  Badge,
-  Card,
-  EmptyState,
-  ErrorState,
-  Loading,
-  PageHeader,
-} from "@/components/ui";
+import { dateTime, timeAgo } from "@/lib/format";
+import { StateLine, type StateKind } from "@/components/Marks";
+import { Chip, Entry, EmptyState, ErrorState, Figure, Loading, PageHeader } from "@/components/ui";
 
 const PRESETS: Record<string, { a: Record<string, unknown>; b: Record<string, unknown> }> = {
   "Reranker: on vs off": {
@@ -45,55 +25,94 @@ const PRESETS: Record<string, { a: Record<string, unknown>; b: Record<string, un
   },
 };
 
-export default function ExperimentsPage() {
+const STATE: Record<string, StateKind> = { completed: "ok", running: "wait", failed: "down" };
+const SEEN_KEY = "ragscope.seenExperiments";
+
+function readSeen(): Set<string> | null {
+  try {
+    const raw = localStorage.getItem(SEEN_KEY);
+    return raw ? new Set(JSON.parse(raw) as string[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function ExperimentsInner() {
+  const params = useSearchParams();
+  const wanted = params.get("exp");
+
   const [experiments, setExperiments] = useState<Experiment[] | null>(null);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Experiment | null>(null);
+  const [seen, setSeen] = useState<Set<string>>(new Set());
+  const opened = useRef(false);
 
-  // create form
   const [name, setName] = useState("Reranker: on vs off");
   const [datasetId, setDatasetId] = useState("");
   const [preset, setPreset] = useState("Reranker: on vs off");
   const [running, setRunning] = useState(false);
 
-  const load = async () => {
+  const markSeen = useCallback((id: string) => {
+    setSeen((prev) => {
+      const next = new Set(prev).add(id);
+      try { localStorage.setItem(SEEN_KEY, JSON.stringify([...next])); } catch { /* storage unavailable */ }
+      return next;
+    });
+  }, []);
+
+  const select = useCallback((e: Experiment) => {
+    setSelected(e);
+    markSeen(e.id);
+  }, [markSeen]);
+
+  const load = useCallback(async () => {
     setError(null);
     try {
-      const [exps, ds] = await Promise.all([
-        api.listExperiments(),
-        api.listDatasets().catch(() => []),
-      ]);
+      const [exps, ds] = await Promise.all([api.listExperiments(), api.listDatasets().catch(() => [])]);
       setExperiments(exps);
       setDatasets(ds);
-      if (ds.length && !datasetId) setDatasetId(ds[0].id);
+      setDatasetId((cur) => cur || (ds.length ? ds[0].id : ""));
+      // A change you have not looked at keeps a marker. The first visit marks nothing: the history is not news.
+      const stored = readSeen();
+      if (stored === null) {
+        const all = new Set(exps.map((x) => x.id));
+        try { localStorage.setItem(SEEN_KEY, JSON.stringify([...all])); } catch { /* storage unavailable */ }
+        setSeen(all);
+      } else {
+        setSeen(stored);
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Failed to load experiments");
       setExperiments([]);
     }
-  };
+  }, []);
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [load]);
+
+  useEffect(() => {
+    if (wanted && experiments && !opened.current) {
+      const found = experiments.find((x) => x.id === wanted);
+      if (found) {
+        opened.current = true;
+        select(found);
+      }
+    }
+  }, [wanted, experiments, select]);
 
   const run = async () => {
     if (!datasetId) {
-      setError("Create/select a dataset first (POST /api/v1/datasets).");
+      setError("Select a dataset first (POST /api/v1/datasets creates one).");
       return;
     }
     setRunning(true);
     setError(null);
     try {
       const cfg = PRESETS[preset];
-      const exp = await api.createExperiment({
-        name,
-        dataset_id: datasetId,
-        config_a: cfg.a,
-        config_b: cfg.b,
-      });
-      setSelected(exp);
+      const exp = await api.createExperiment({ name, dataset_id: datasetId, config_a: cfg.a, config_b: cfg.b });
+      select(exp);
       await load();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Experiment run failed");
@@ -102,268 +121,205 @@ export default function ExperimentsPage() {
     }
   };
 
+  const sorted = [...(experiments ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at));
+
   return (
-    <div>
+    <>
       <PageHeader
         title="A/B Experiments"
-        subtitle="Compare two pipeline configurations on the same golden dataset. Deltas carry a paired-bootstrap significance test — not just a difference of means."
-        actions={
-          <button
-            onClick={load}
-            className="flex items-center gap-2 rounded-lg border border-border bg-surface-container px-3 py-2 text-sm text-on-surface hover:border-primary/50"
-          >
-            <RefreshCw className="h-4 w-4" /> Refresh
-          </button>
-        }
+        subtitle="Compare two pipeline configurations on the same golden dataset. Each difference carries a paired-bootstrap significance test, not just a difference of means."
+        actions={<button type="button" onClick={load} className="btn"><RefreshCw aria-hidden="true" /> Refresh</button>}
       />
 
-      {error && (
-        <div className="mb-6">
-          <ErrorState message={error} />
-        </div>
-      )}
+      {error && <div style={{ marginBottom: 24 }}><ErrorState message={error} onRetry={load} /></div>}
 
-      <Card className="mb-6">
-        <h3 className="mb-4 font-semibold text-on-surface">New experiment</h3>
-        <div className="grid gap-4 md:grid-cols-4">
-          <label className="text-xs text-on-surface-muted md:col-span-2">
-            Name
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="mt-1 block w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-on-surface"
-            />
-          </label>
-          <label className="text-xs text-on-surface-muted">
-            Dataset
-            <select
-              value={datasetId}
-              onChange={(e) => setDatasetId(e.target.value)}
-              className="mt-1 block w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-on-surface"
-            >
-              {datasets.length === 0 && <option value="">No datasets</option>}
-              {datasets.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name} ({d.sample_count})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs text-on-surface-muted">
-            Comparison
-            <select
-              value={preset}
-              onChange={(e) => {
-                setPreset(e.target.value);
-                setName(e.target.value);
-              }}
-              className="mt-1 block w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-on-surface"
-            >
-              {Object.keys(PRESETS).map((p) => (
-                <option key={p}>{p}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="mt-4 flex items-center gap-3">
-          <button
-            onClick={run}
-            disabled={running}
-            className="flex items-center gap-2 rounded-lg bg-primary/20 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/30 disabled:opacity-50"
-          >
-            <Play className="h-4 w-4" />
-            {running ? "Running both variants…" : "Run experiment"}
-          </button>
-          <span className="font-mono text-xs text-on-surface-muted">
-            A: {JSON.stringify(PRESETS[preset].a)} · B:{" "}
-            {JSON.stringify(PRESETS[preset].b)}
-          </span>
-        </div>
-      </Card>
-
-      <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
-        <Card className="p-0">
-          <div className="border-b border-border px-4 py-3 text-xs font-medium uppercase tracking-wider text-on-surface-muted">
-            History
-          </div>
-          {experiments === null ? (
-            <div className="p-5">
-              <Loading />
+      <div className="cols">
+        <div>
+          <Entry kind="New experiment" source="POST /api/v1/experiments">
+            <div className="stack">
+              <label className="field">
+                <span className="lab">Name</span>
+                <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+              </label>
+              <div className="row">
+                <label className="field" style={{ flex: "1 1 180px" }}>
+                  <span className="lab">Dataset</span>
+                  <select className="select" value={datasetId} onChange={(e) => setDatasetId(e.target.value)}>
+                    {datasets.length === 0 && <option value="">No datasets</option>}
+                    {datasets.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name} ({d.sample_count} samples)</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field" style={{ flex: "1 1 180px" }}>
+                  <span className="lab">Comparison</span>
+                  <select className="select" value={preset} onChange={(e) => { setPreset(e.target.value); setName(e.target.value); }}>
+                    {Object.keys(PRESETS).map((p) => <option key={p}>{p}</option>)}
+                  </select>
+                </label>
+              </div>
+              <p className="mono" style={{ color: "var(--ink-2)", overflowWrap: "anywhere" }}>
+                A: {JSON.stringify(PRESETS[preset].a)}<br />B: {JSON.stringify(PRESETS[preset].b)}
+              </p>
+              <div>
+                <button type="button" className="btn btn-primary" onClick={run} disabled={running}>
+                  <Play aria-hidden="true" /> {running ? "Running both variants" : "Run experiment"}
+                </button>
+              </div>
+              {running && (
+                <p className="lede" role="status">Both variants run over every sample, so this can take several minutes. The page will show the result when it finishes.</p>
+              )}
             </div>
-          ) : experiments.length === 0 ? (
-            <div className="p-5">
+          </Entry>
+
+          <Entry kind="History" source="GET /api/v1/experiments">
+            {experiments === null ? (
+              <Loading label="Loading experiments" />
+            ) : sorted.length === 0 ? (
               <EmptyState title="No experiments yet" hint="Run one above." />
-            </div>
-          ) : (
-            <ul className="divide-y divide-border">
-              {experiments.map((e) => (
-                <li key={e.id}>
-                  <button
-                    onClick={() => setSelected(e)}
-                    className={`flex w-full items-center justify-between px-4 py-3 text-left hover:bg-surface-container-high ${
-                      selected?.id === e.id ? "bg-primary/10" : ""
-                    }`}
-                  >
-                    <div>
-                      <div className="text-sm text-on-surface">{e.name}</div>
-                      <div className="text-[11px] text-on-surface-muted">
-                        {timeAgo(e.created_at)}
-                      </div>
-                    </div>
-                    <Badge
-                      color={
-                        e.status === "completed"
-                          ? "#00d4aa"
-                          : e.status === "failed"
-                            ? "#ffb4ab"
-                            : "#ffb77a"
-                      }
-                    >
-                      {e.status}
-                    </Badge>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+            ) : (
+              <div className="tab-wrap">
+                <table className="tab">
+                  <caption className="sr-only">Experiments, newest first</caption>
+                  <thead><tr><th>Experiment</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {sorted.map((e) => (
+                      <tr key={e.id} className={selected?.id === e.id ? "sel" : undefined} onClick={() => select(e)} style={{ cursor: "pointer" }}>
+                        <td>
+                          <button type="button" className="row-btn" aria-pressed={selected?.id === e.id} onClick={(ev) => { ev.stopPropagation(); select(e); }}>
+                            {e.name}
+                            <span className="id">{dateTime(e.created_at)} · {timeAgo(e.created_at)}</span>
+                          </button>
+                        </td>
+                        <td>
+                          <StateLine kind={STATE[e.status] ?? "off"}>{e.status}</StateLine>
+                          {e.status === "completed" && !seen.has(e.id) && <> <Chip tone="on">new</Chip></>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Entry>
+        </div>
 
-        <Card>
-          {selected ? (
-            <ExperimentResult experiment={selected} />
-          ) : (
-            <EmptyState
-              title="Select an experiment"
-              hint="Pick one from history to see the metric deltas and comparison chart."
-            />
-          )}
-        </Card>
+        {selected ? (
+          <ExperimentResult experiment={selected} dataset={datasets.find((d) => d.id === selected.dataset_id)} />
+        ) : (
+          <Entry kind="Experiment">
+            <EmptyState title="No experiment open" hint="Pick one from the history to read its figure and the table behind it." />
+          </Entry>
+        )}
       </div>
-    </div>
+    </>
   );
 }
 
-function DeltaArrow({ delta }: { delta: MetricDelta }) {
-  if (delta.winner === "tie")
-    return <Minus className="inline h-3.5 w-3.5 text-on-surface-muted" />;
-  const improved = delta.winner === "B";
-  const Icon = improved ? ArrowUp : ArrowDown;
-  return (
-    <Icon
-      className={`inline h-3.5 w-3.5 ${improved ? "text-primary" : "text-danger"}`}
-    />
-  );
-}
+const fmt = (v: number | undefined) => (v == null ? "n/a" : Number.isFinite(v) ? v.toFixed(4) : String(v));
+const WINNER: Record<MetricDelta["winner"], string> = { A: "A ahead", B: "B ahead", tie: "tie" };
 
-function ExperimentResult({ experiment }: { experiment: Experiment }) {
-  const deltas = experiment.deltas ?? {};
-  const entries = Object.entries(deltas);
+function ExperimentResult({ experiment, dataset }: { experiment: Experiment; dataset?: Dataset }) {
+  const entries = Object.entries(experiment.deltas ?? {});
+  const n = entries[0]?.[1]?.n;
+
+  const head = (
+    <dl className="deflist" style={{ marginBottom: 20 }}>
+      <dt>Status</dt><dd><StateLine kind={STATE[experiment.status] ?? "off"}>{experiment.status}</StateLine></dd>
+      <dt>Dataset</dt><dd>{dataset ? `${dataset.name}, ${dataset.sample_count} samples` : experiment.dataset_id}</dd>
+      <dt>Variant A</dt><dd style={{ overflowWrap: "anywhere" }}>{JSON.stringify(experiment.config_a)}</dd>
+      <dt>Variant B</dt><dd style={{ overflowWrap: "anywhere" }}>{JSON.stringify(experiment.config_b)}</dd>
+      {experiment.completed_at && (<><dt>Finished</dt><dd>{dateTime(experiment.completed_at)}</dd></>)}
+    </dl>
+  );
 
   if (experiment.status === "failed") {
-    return <ErrorState message={experiment.error_message ?? "Experiment failed"} />;
+    return (
+      <Entry kind="Experiment" date={experiment.created_at} id={experiment.id} title={experiment.name}>
+        {head}
+        <ErrorState message={experiment.error_message ?? "The experiment failed"} />
+      </Entry>
+    );
   }
   if (entries.length === 0) {
     return (
-      <EmptyState
-        title="No metrics"
-        hint="This experiment produced no comparable metrics."
-      />
+      <Entry kind="Experiment" date={experiment.created_at} id={experiment.id} title={experiment.name}>
+        {head}
+        <EmptyState title="No comparable metrics" hint={experiment.status === "running" ? "This experiment is still running." : "This experiment produced no comparable metrics."} />
+      </Entry>
     );
   }
 
-  const chartData = entries.map(([metric, d]) => ({
-    metric: metric.replace("@", "@​"),
-    A: Number(d.a?.toFixed?.(4) ?? d.a),
-    B: Number(d.b?.toFixed?.(4) ?? d.b),
-  }));
+  const chartData = entries.map(([metric, d]) => ({ metric, A: Number(fmt(d.a)), B: Number(fmt(d.b)) }));
+  const significant = entries.filter(([, d]) => d.significant).length;
 
   return (
-    <div>
-      <h3 className="mb-1 font-semibold text-on-surface">{experiment.name}</h3>
-      <p className="mb-4 text-xs text-on-surface-muted">
-        Variant A vs Variant B · {entries[0]?.[1]?.n ?? "?"} samples
-      </p>
+    <Entry kind="Experiment" date={experiment.created_at} id={experiment.id} title={experiment.name}>
+      {head}
+      <Figure
+        caption={
+          <>
+            <b>Variant A against variant B</b>
+            {n != null ? <> on {n} samples</> : null}
+            {dataset ? <> of the dataset {dataset.name}</> : null}. Solid bars are the mean of each metric for A, hatched bars for B, drawn on the same axes.
+            {" "}{significant} of {entries.length} differences {significant === 1 ? "is" : "are"} significant by a paired bootstrap; the table gives each p-value.
+          </>
+        }
+      >
+        <div className="plot" style={{ height: 280 }} role="img" aria-label={`Bar chart of ${entries.length} metrics for variant A and variant B`}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 8, right: 8, bottom: 8, left: -16 }}>
+              <defs>
+                <pattern id="hatchB" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                  <rect width="6" height="6" fill="#fbf9f3" />
+                  <rect width="3" height="6" fill="#2b5fb0" />
+                </pattern>
+              </defs>
+              <CartesianGrid stroke="#cfd8ea" />
+              <XAxis dataKey="metric" tick={{ fill: "#3a425a", fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={54} />
+              <YAxis tick={{ fill: "#3a425a", fontSize: 11 }} />
+              <Tooltip contentStyle={{ background: "var(--sheet)", border: "1.5px solid var(--ink)", borderRadius: 0, fontSize: 12 }} />
+              <Bar dataKey="A" fill="#14182b" />
+              <Bar dataKey="B" fill="url(#hatchB)" stroke="#2b5fb0" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </Figure>
 
-      <div className="mb-6 h-64 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 8, right: 8, bottom: 8, left: -16 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#26313f" />
-            <XAxis
-              dataKey="metric"
-              tick={{ fill: "#8fa0b0", fontSize: 10 }}
-              interval={0}
-              angle={-20}
-              textAnchor="end"
-              height={50}
-            />
-            <YAxis tick={{ fill: "#8fa0b0", fontSize: 10 }} />
-            <Tooltip
-              contentStyle={{
-                background: "#141b26",
-                border: "1px solid #26313f",
-                borderRadius: 8,
-                fontSize: 12,
-              }}
-            />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Bar dataKey="A" fill="#00b4d8" radius={[3, 3, 0, 0]} />
-            <Bar dataKey="B" fill="#00d4aa" radius={[3, 3, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs text-on-surface-muted">
-            <tr>
-              <th className="py-2 pr-4 font-medium">Metric</th>
-              <th className="py-2 pr-4 font-medium">A</th>
-              <th className="py-2 pr-4 font-medium">B</th>
-              <th className="py-2 pr-4 font-medium">Δ</th>
-              <th className="py-2 pr-4 font-medium">%</th>
-              <th className="py-2 font-medium">Sig.</th>
-            </tr>
+      <div className="tab-wrap" style={{ marginTop: 24 }}>
+        <table className="tab">
+          <caption className="sr-only">Metric values for variants A and B</caption>
+          <thead>
+            <tr><th>Metric</th><th className="num">A</th><th className="num">B</th><th className="num hide-sm">Difference</th><th className="num hide-sm">Change</th><th className="hide-sm">Verdict</th></tr>
           </thead>
-          <tbody className="font-mono text-xs">
+          <tbody>
             {entries.map(([metric, d]) => (
-              <tr key={metric} className="border-t border-border">
-                <td className="py-2 pr-4 text-on-surface">{metric}</td>
-                <td className="py-2 pr-4 text-on-surface-muted">
-                  {d.a?.toFixed?.(4) ?? d.a}
+              <tr key={metric}>
+                <td className="mono">
+                  {metric}
+                  <span className="id only-sm">{WINNER[d.winner]}, {d.significant ? `significant, p = ${d.p_value}` : "not significant"}</span>
                 </td>
-                <td className="py-2 pr-4 text-on-surface-muted">
-                  {d.b?.toFixed?.(4) ?? d.b}
-                </td>
-                <td className="py-2 pr-4">
-                  <DeltaArrow delta={d} />{" "}
-                  <span
-                    className={
-                      d.winner === "B"
-                        ? "text-primary"
-                        : d.winner === "A"
-                          ? "text-danger"
-                          : "text-on-surface-muted"
-                    }
-                  >
-                    {d.delta > 0 ? "+" : ""}
-                    {d.delta}
-                  </span>
-                </td>
-                <td className="py-2 pr-4 text-on-surface-muted">
-                  {d.pct_change == null ? "—" : `${d.pct_change}%`}
-                </td>
-                <td className="py-2">
-                  {d.significant ? (
-                    <Badge color="#00d4aa">p={d.p_value}</Badge>
-                  ) : (
-                    <span className="text-on-surface-muted">ns</span>
-                  )}
+                <td className="num">{fmt(d.a)}</td>
+                <td className="num">{fmt(d.b)}</td>
+                <td className="num hide-sm">{d.delta > 0 ? "+" : ""}{d.delta}</td>
+                <td className="num hide-sm">{d.pct_change == null ? "n/a" : `${d.pct_change}%`}</td>
+                <td className="hide-sm">
+                  {WINNER[d.winner]}
+                  <span className="id">{d.significant ? `significant, p = ${d.p_value}` : "not significant"}</span>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-    </div>
+    </Entry>
+  );
+}
+
+export default function ExperimentsPage() {
+  return (
+    <Suspense fallback={<Loading label="Loading" />}>
+      <ExperimentsInner />
+    </Suspense>
   );
 }

@@ -1,38 +1,29 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { Hanken_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-import { Sidebar } from "@/components/Sidebar";
+import { Shell } from "@/components/Shell";
+
+const ui = Hanken_Grotesk({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"], variable: "--font-ui", display: "swap" });
+const mono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-mono", display: "swap" });
+
+const TITLE = "RAGScope: evaluation and observability for RAG";
+const DESCRIPTION =
+  "A self-hosted RAG platform with its own evaluation and observability layer: grounded answers with citations, retrieval stage scores, query traces, A/B experiments and latency analytics.";
 
 export const metadata: Metadata = {
-  title: "RAGScope — Observability",
-  description:
-    "Self-hosted RAG platform with evaluation & observability: traces, A/B experiments, cost & latency analytics.",
+  title: { default: TITLE, template: "%s · RAGScope" },
+  description: DESCRIPTION,
+  openGraph: { title: TITLE, description: DESCRIPTION, type: "website", siteName: "RAGScope" },
+  twitter: { card: "summary", title: TITLE, description: DESCRIPTION },
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export const viewport: Viewport = { themeColor: "#1f2a44" };
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
-      <head>
-        <link
-          rel="preconnect"
-          href="https://fonts.googleapis.com"
-          crossOrigin="anonymous"
-        />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body className="min-h-screen bg-background text-on-surface antialiased">
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <main className="flex-1 overflow-x-hidden">
-            <div className="mx-auto max-w-7xl px-6 py-8">{children}</div>
-          </main>
-        </div>
+    <html lang="en" className={`${ui.variable} ${mono.variable}`}>
+      <body>
+        <Shell>{children}</Shell>
       </body>
     </html>
   );
