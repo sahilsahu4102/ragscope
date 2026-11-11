@@ -1,0 +1,458 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-11T13:57:14Z",
+  "title": "Design System: RAGScope",
+  "extensions": {
+    "colorMeta": {
+      "cloth": {
+        "role": "primary",
+        "displayName": "Cloth",
+        "canonical": "#1f2a44",
+        "tonalRamp": [
+          "#0e1220",
+          "#13192a",
+          "#182035",
+          "#1d273f",
+          "#3c455c",
+          "#757c8c",
+          "#afb3bc",
+          "#e9eaec"
+        ]
+      },
+      "cloth-hover": {
+        "role": "primary",
+        "displayName": "Cloth Hover",
+        "canonical": "#2c3a5c",
+        "tonalRamp": [
+          "#0e1220",
+          "#171d31",
+          "#1f2942",
+          "#283453",
+          "#475371",
+          "#7d869b",
+          "#b4b9c5",
+          "#eaebef"
+        ]
+      },
+      "cloth-ink": {
+        "role": "primary",
+        "displayName": "Cloth Ink",
+        "canonical": "#dde2ee",
+        "tonalRamp": [
+          "#0e1220",
+          "#494d5b",
+          "#848996",
+          "#bfc4d1",
+          "#e1e6f0",
+          "#eaedf5",
+          "#f3f5f9",
+          "#fcfcfd"
+        ]
+      },
+      "red": {
+        "role": "secondary",
+        "displayName": "Margin Red",
+        "canonical": "#a8302a",
+        "tonalRamp": [
+          "#0e1220",
+          "#3a1b23",
+          "#662326",
+          "#922c29",
+          "#b34b45",
+          "#ca807c",
+          "#e0b5b3",
+          "#f6eaea"
+        ]
+      },
+      "red-wash": {
+        "role": "secondary",
+        "displayName": "Red Wash",
+        "canonical": "#f4e0dc",
+        "tonalRamp": [
+          "#0e1220",
+          "#504d56",
+          "#91888b",
+          "#d3c3c1",
+          "#f5e4e0",
+          "#f8ecea",
+          "#fbf4f2",
+          "#fefcfc"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "#f4f1e8",
+        "tonalRamp": [
+          "#0e1220",
+          "#505259",
+          "#919192",
+          "#d3d1cb",
+          "#f5f3eb",
+          "#f8f6f1",
+          "#fbfaf7",
+          "#fefefd"
+        ]
+      },
+      "sheet": {
+        "role": "neutral",
+        "displayName": "Sheet",
+        "canonical": "#fbf9f3",
+        "tonalRamp": [
+          "#0e1220",
+          "#52545c",
+          "#959699",
+          "#d9d8d5",
+          "#fcfaf5",
+          "#fdfbf8",
+          "#fefdfb",
+          "#fffefe"
+        ]
+      },
+      "sunk": {
+        "role": "neutral",
+        "displayName": "Sunk",
+        "canonical": "#ece8db",
+        "tonalRamp": [
+          "#0e1220",
+          "#4d4f55",
+          "#8d8c8b",
+          "#ccc9c0",
+          "#eeebe0",
+          "#f3f1e9",
+          "#f8f7f2",
+          "#fdfdfb"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#14182b",
+        "tonalRamp": [
+          "#0e1220",
+          "#101423",
+          "#111526",
+          "#131729",
+          "#323646",
+          "#6f717d",
+          "#abacb3",
+          "#e8e8ea"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Ink 2",
+        "canonical": "#3a425a",
+        "tonalRamp": [
+          "#0e1220",
+          "#1b2031",
+          "#272d41",
+          "#343b52",
+          "#535a6f",
+          "#868b9a",
+          "#b9bcc4",
+          "#ebecee"
+        ]
+      },
+      "ink-3": {
+        "role": "neutral",
+        "displayName": "Ink 3",
+        "canonical": "#566075",
+        "tonalRamp": [
+          "#0e1220",
+          "#232838",
+          "#373f51",
+          "#4c5569",
+          "#6c7487",
+          "#979daa",
+          "#c3c6ce",
+          "#eeeff1"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Rule",
+        "canonical": "#d4cebc",
+        "tonalRamp": [
+          "#0e1220",
+          "#47484d",
+          "#7f7d79",
+          "#b8b3a6",
+          "#dad4c5",
+          "#e5e1d6",
+          "#f0eee7",
+          "#fbfaf8"
+        ]
+      },
+      "hover-row": {
+        "role": "neutral",
+        "displayName": "Hover Row",
+        "canonical": "#efebdd",
+        "tonalRamp": [
+          "#0e1220",
+          "#4e5056",
+          "#8f8e8c",
+          "#cfccc2",
+          "#f1eee1",
+          "#f5f3ea",
+          "#f9f8f3",
+          "#fdfdfc"
+        ]
+      },
+      "graph": {
+        "role": "tertiary",
+        "displayName": "Graph Blue",
+        "canonical": "#cfd8ea",
+        "tonalRamp": [
+          "#0e1220",
+          "#454b5a",
+          "#7c8393",
+          "#b3bccd",
+          "#d5dded",
+          "#e2e7f2",
+          "#eef1f8",
+          "#fafbfd"
+        ]
+      },
+      "blue": {
+        "role": "tertiary",
+        "displayName": "Retriever Blue",
+        "canonical": "#2b5fb0",
+        "tonalRamp": [
+          "#0e1220",
+          "#162849",
+          "#1f3e72",
+          "#27549b",
+          "#4674ba",
+          "#7d9dce",
+          "#b3c6e3",
+          "#eaeff7"
+        ]
+      },
+      "green": {
+        "role": "tertiary",
+        "displayName": "LLM Green",
+        "canonical": "#2f6b4f",
+        "tonalRamp": [
+          "#0e1220",
+          "#172b2d",
+          "#21453b",
+          "#2a5e48",
+          "#4a7e66",
+          "#7fa493",
+          "#b5cac0",
+          "#eaf0ed"
+        ]
+      },
+      "plum": {
+        "role": "tertiary",
+        "displayName": "Reranker Plum",
+        "canonical": "#6b3f73",
+        "tonalRamp": [
+          "#0e1220",
+          "#291f38",
+          "#432c4f",
+          "#5e3967",
+          "#7e5885",
+          "#a489a9",
+          "#cabacd",
+          "#f0ecf1"
+        ]
+      },
+      "ochre": {
+        "role": "tertiary",
+        "displayName": "Embedding Ochre",
+        "canonical": "#8a5a10",
+        "tonalRamp": [
+          "#0e1220",
+          "#31271b",
+          "#553b17",
+          "#785012",
+          "#996f2f",
+          "#b79a6c",
+          "#d5c4aa",
+          "#f3eee7"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Page titles."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Second-level headings."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Entry titles: a question, an experiment name."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field labels, table heads and the entry kind."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Entry header text and figure captions."
+      },
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "Recorded values: ids, durations, scores, endpoints."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "0.15s ease",
+        "purpose": "Button fill change only; everything is disabled under prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "columns-stack",
+        "value": "1100px"
+      },
+      {
+        "name": "rail-to-bar",
+        "value": "860px"
+      },
+      {
+        "name": "drop-secondary-columns",
+        "value": "640px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one filled action on a screen; pressing darkens it to the cloth.",
+      "html": "<button class=\"ds-btn ds-primary\">Run experiment</button>",
+      "css": ".ds-btn{font-family:'Hanken Grotesk',system-ui,sans-serif;font-weight:650;font-size:15px;min-height:40px;padding:0 16px;border:1.5px solid #14182b;border-radius:0;cursor:pointer;background:transparent;color:#14182b}.ds-primary{background:#14182b;color:#f4f1e8}.ds-primary:hover{background:#1f2a44}.ds-btn:focus-visible,.ds-field:focus-visible{outline:3px solid #14182b;outline-offset:2px}"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Secondary action; hover fills ink.",
+      "html": "<button class=\"ds-btn ds-outline\">Refresh</button>",
+      "css": ".ds-btn{font-family:'Hanken Grotesk',system-ui,sans-serif;font-weight:650;font-size:15px;min-height:40px;padding:0 16px;border:1.5px solid #14182b;border-radius:0;cursor:pointer;background:transparent;color:#14182b}.ds-outline:hover{background:#14182b;color:#f4f1e8}.ds-btn:focus-visible,.ds-field:focus-visible{outline:3px solid #14182b;outline-offset:2px}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive action in margin red.",
+      "html": "<button class=\"ds-btn ds-danger\">Delete</button>",
+      "css": ".ds-btn{font-family:'Hanken Grotesk',system-ui,sans-serif;font-weight:650;font-size:15px;min-height:40px;padding:0 16px;border:1.5px solid #14182b;border-radius:0;cursor:pointer;background:transparent;color:#14182b}.ds-danger{border-color:#a8302a;color:#a8302a}.ds-danger:hover{background:#a8302a;color:#f4f1e8}.ds-btn:focus-visible,.ds-field:focus-visible{outline:3px solid #14182b;outline-offset:2px}"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "A typing field on sheet paper with its label above.",
+      "html": "<label class=\"ds-label\" for=\"q\">Query to inspect</label><input id=\"q\" class=\"ds-field\" placeholder=\"Ask something your documents can answer\">",
+      "css": ".ds-label{display:block;font-family:'Hanken Grotesk',system-ui,sans-serif;font-weight:650;font-size:14px;color:#3a425a;margin-bottom:4px}.ds-field{display:block;width:340px;min-height:40px;padding:0 10px;background:#fbf9f3;border:1.5px solid #14182b;border-radius:0;color:#14182b;font-size:15px}.ds-btn:focus-visible,.ds-field:focus-visible{outline:3px solid #14182b;outline-offset:2px}"
+    },
+    {
+      "name": "Toggle",
+      "kind": "button",
+      "refersTo": "toggle",
+      "description": "A pipeline switch: a drawn mark and a word; pressed is an ink block.",
+      "html": "<button class=\"ds-tg ds-on\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 14 14\"><rect x=\"1.5\" y=\"1.5\" width=\"11\" height=\"11\" fill=\"currentColor\"/></svg>Reranker</button> <button class=\"ds-tg\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 14 14\"><rect x=\"2.5\" y=\"2.5\" width=\"9\" height=\"9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"/></svg>Hybrid + RRF</button>",
+      "css": ".ds-tg{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:0 12px;background:transparent;border:1.5px solid #14182b;border-radius:0;font-family:'Hanken Grotesk',system-ui,sans-serif;font-size:14px;font-weight:600;color:#14182b}.ds-on{background:#14182b;color:#f4f1e8}"
+    },
+    {
+      "name": "Nav Link",
+      "kind": "navigation",
+      "refersTo": "nav-link",
+      "description": "A rail link on the cloth; the current page is a paper block with ink text.",
+      "html": "<div class=\"ds-rail\"><a class=\"ds-link\" href=\"#\">Documents</a><a class=\"ds-link ds-cur\" href=\"#\">Trace Viewer</a></div>",
+      "css": ".ds-rail{background:#1f2a44;padding:12px;width:220px;display:grid;gap:4px}.ds-link{display:block;min-height:44px;line-height:40px;padding:0 12px;border:2px solid transparent;color:#dde2ee;text-decoration:none;font-family:'Hanken Grotesk',system-ui,sans-serif;font-weight:600}.ds-link:hover{background:#2c3a5c;border-color:#dde2ee}.ds-cur{background:#f4f1e8;color:#14182b;border-color:#f4f1e8}"
+    },
+    {
+      "name": "Entry",
+      "kind": "custom",
+      "refersTo": "note",
+      "description": "The signature: heavy top rule, a header strip with kind, real date and short id, the body, and a witness footer with the full id.",
+      "html": "<div class=\"ds-entry\"><div class=\"ds-head\"><b>Trace</b><span>11 Nov 2026, 19:06</span><span class=\"m\">855cc43d</span></div><div class=\"ds-body\"><span class=\"m\">rag_query</span><br>Duration <span class=\"m\">17.91 s</span> across 9 spans</div><div class=\"ds-wit\">Recorded by the RAGScope API. Trace id <span class=\"m\">855cc43d-43a8-4efe-9e45-0fbea2280560</span></div></div>",
+      "css": ".ds-entry{border-top:3px solid #14182b;width:420px;font-family:'Hanken Grotesk',system-ui,sans-serif;font-size:15px;color:#14182b;background:#f4f1e8}.ds-head{display:flex;gap:16px;align-items:baseline;padding:10px 0;border-bottom:1px solid #d4cebc;font-size:13px;color:#3a425a}.ds-head b{font-weight:800;color:#14182b;font-size:14px}.ds-body{padding:16px 0}.ds-wit{padding-top:10px;border-top:1px solid #d4cebc;font-size:12px;color:#566075;overflow-wrap:anywhere}.m{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px}"
+    },
+    {
+      "name": "Waking Note",
+      "kind": "custom",
+      "refersTo": "note",
+      "description": "A slow API stated honestly: a dashed sunk box with the dashed-ring mark.",
+      "html": "<div class=\"ds-note\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 14 14\"><rect x=\"2.5\" y=\"2.5\" width=\"9\" height=\"9\" fill=\"none\" stroke=\"#14182b\" stroke-width=\"2\" stroke-dasharray=\"3 2\"/></svg><div><b>The API is waking up</b><p>A host that sleeps when idle can take about a minute to answer its first request.</p></div></div>",
+      "css": ".ds-note{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;padding:12px 14px;border:2px dashed #566075;background:#ece8db;font-family:'Hanken Grotesk',system-ui,sans-serif;font-size:15px;width:380px;color:#14182b}.ds-note p{margin:0;color:#3a425a}.ds-note svg{margin-top:5px}"
+    },
+    {
+      "name": "Span Kind Legend",
+      "kind": "custom",
+      "refersTo": "note",
+      "description": "Span kinds told apart by shape and colour together: square, circle, diamond, triangle, inverted triangle.",
+      "html": "<div class=\"ds-lg\"><span><svg width=\"12\" height=\"12\"><rect x=\"1\" y=\"1\" width=\"10\" height=\"10\" fill=\"#566075\"/></svg>CHAIN</span><span><svg width=\"12\" height=\"12\"><circle cx=\"6\" cy=\"6\" r=\"5\" fill=\"#2b5fb0\"/></svg>RETRIEVER</span><span><svg width=\"12\" height=\"12\"><path d=\"M6 0.5L11.5 6L6 11.5L0.5 6Z\" fill=\"#6b3f73\"/></svg>RERANKER</span><span><svg width=\"12\" height=\"12\"><path d=\"M6 1L11.5 11H0.5Z\" fill=\"#2f6b4f\"/></svg>LLM</span><span><svg width=\"12\" height=\"12\"><path d=\"M0.5 1H11.5L6 11Z\" fill=\"#8a5a10\"/></svg>EMBEDDING</span></div>",
+      "css": ".ds-lg{display:flex;flex-wrap:wrap;gap:6px 20px;font-family:'Hanken Grotesk',system-ui,sans-serif;font-size:13px;font-weight:600;color:#14182b}.ds-lg span{display:inline-flex;align-items:center;gap:8px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Experiment Notebook",
+    "overview": "The console is set like a lab notebook: a navy cloth rail, bone paper, blue-black ink, and one entry per recorded fact with its real date and id. Every figure carries a caption written from its own data.",
+    "keyCharacteristics": [
+      "A navy cloth rail carries the paper-coloured plate, the nav, and the live API state; the page beside it is paper.",
+      "The **Entry**: a heavy top rule, a header strip (kind, real date, short id or the source endpoint), the body, and a witness footer printing the full id.",
+      "The **Figure**: a chart on sheet paper with a caption generated from the data (counts, window, how many differences are significant), never a hand-written claim.",
+      "Hanken Grotesk for reading, JetBrains Mono for ids, durations, scores and endpoints; tabular numerals everywhere a number is read.",
+      "One vocabulary of drawn state marks: solid square (ok, ready), ring (off), dashed ring (waiting, running), struck square (down, failed). Every mark is paired with a word.",
+      "Span kinds are told apart by shape as well as colour: square chain, circle retriever, diamond reranker, triangle LLM, inverted triangle embedding.",
+      "Square corners, no shadow, no gradient, no blur.",
+      "Every wait is stated honestly: a sleeping host is announced as waking, a down API is named as unreachable, and nothing spins forever."
+    ],
+    "rules": [
+      {
+        "name": "The Margin-Red Rule",
+        "body": "Red marks failure and regression only. A destructive button is red; a neutral one never is, and \"completed\" is never green.",
+        "section": "colors"
+      },
+      {
+        "name": "The Colour-Is-Never-Alone Rule",
+        "body": "Every colour that means something also has a shape, a word or a position. Span kinds have shapes, states have marks plus words, and A against B is solid against hatched.",
+        "section": "colors"
+      },
+      {
+        "name": "The Mono-Means-Recorded Rule",
+        "body": "Monospace is for values the system recorded: ids, durations, scores, endpoints. Never for decoration or headings.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Every number a person compares sits in tabular numerals, and numeric columns are right-aligned.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Rule",
+        "body": "If something needs to stand out, change its rule weight, its ground or its mark. Never add a shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do show only values the API returned, and write a missing value as \"n/a\".",
+      "Do pair every state colour with a drawn mark and a word.",
+      "Do write each figure's caption from its own data: counts, window, how many differences are significant.",
+      "Do announce a waiting or unreachable API in words, with a way to retry, instead of a spinner.",
+      "Do keep entries to the same anatomy: heavy rule, header strip, body, witness footer.",
+      "Do put A and B on identical axes and tell them apart by fill (solid and hatched), not hue alone."
+    ],
+    "donts": [
+      "Don't invent numbering, sample data, trend arrows or stats for the sake of a fuller screen.",
+      "Don't use shadows, blur, gradients, glow or rounded corners.",
+      "Don't use red for anything except failure, a regression, or a destructive action.",
+      "Don't use monospace for headings or decoration.",
+      "Don't let a table need sideways scrolling to be understood on a phone; fold secondary columns into the first cell.",
+      "Don't claim a benchmark gain the data does not support; the interface shows the paired-bootstrap verdict, including \"not significant\"."
+    ]
+  }
+}
