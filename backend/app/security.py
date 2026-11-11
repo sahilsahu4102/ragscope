@@ -60,13 +60,18 @@ class RateLimiter:
     and abuse, not precise traffic shaping.
     """
 
-    def __init__(self, limit: int, window_seconds: int, scope: str):
+    def __init__(self, limit: int, window_seconds: int, scope: str, writes_only: bool = False):
         self.limit = limit
         self.window = window_seconds
         self.scope = scope
+        # Reads (list, status, detail) are cheap even on a heavy router; only
+        # the requests that start whole-corpus work should spend the budget.
+        self.writes_only = writes_only
 
     async def __call__(self, request: Request) -> None:
         if not settings.rate_limit_enabled:
+            return
+        if self.writes_only and request.method in ("GET", "HEAD", "OPTIONS"):
             return
 
         identity = client_identity(request)
@@ -112,7 +117,7 @@ class RateLimiter:
 limit_query = RateLimiter(limit=settings.rate_limit_query_per_min, window_seconds=60, scope="query")
 # Ingestion and evaluation are far heavier again (whole-corpus work).
 limit_heavy = RateLimiter(
-    limit=settings.rate_limit_heavy_per_hour, window_seconds=3600, scope="heavy"
+    limit=settings.rate_limit_heavy_per_hour, window_seconds=3600, scope="heavy", writes_only=True
 )
 
 

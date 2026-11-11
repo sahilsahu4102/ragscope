@@ -93,9 +93,10 @@ class FakeRedis:
 
 
 class FakeRequest:
-    def __init__(self, host: str = "1.2.3.4", headers: dict | None = None):
+    def __init__(self, host: str = "1.2.3.4", headers: dict | None = None, method: str = "POST"):
         self.client = type("C", (), {"host": host})()
         self.headers = headers or {}
+        self.method = method
 
 
 @pytest.fixture
@@ -145,6 +146,18 @@ async def test_limits_are_per_client(limiter_env):
         await limiter(cast(Any, FakeRequest(host="1.1.1.1")))
     # Different client, own bucket.
     await limiter(cast(Any, FakeRequest(host="2.2.2.2")))
+
+
+@pytest.mark.asyncio
+async def test_writes_only_limiter_ignores_reads(limiter_env):
+    sec, _ = limiter_env
+    h = sec.RateLimiter(limit=1, window_seconds=60, scope="heavy", writes_only=True)
+    for _ in range(5):  # list and status polls never spend the budget
+        await h(cast(Any, FakeRequest(method="GET")))
+    await h(cast(Any, FakeRequest(method="POST")))
+    with pytest.raises(HTTPException) as exc:
+        await h(cast(Any, FakeRequest(method="POST")))
+    assert exc.value.status_code == 429
 
 
 @pytest.mark.asyncio
