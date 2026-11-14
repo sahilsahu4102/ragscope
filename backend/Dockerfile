@@ -22,9 +22,19 @@ COPY pyproject.toml .
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# No [dev]: pytest/ruff/mypy are CI concerns, not runtime ones.
+# CPU-only torch, installed first so the dependency resolver treats it as
+# already satisfied.
+#
+# sentence-transformers pulls torch, and pip's default wheel bundles the CUDA
+# runtime — roughly 2.5GB of it. This container has no GPU: docker-compose
+# reserves the nvidia device for the ollama service only, and the cross-encoder
+# runs on CPU. Shipping CUDA here costs image size, registry transfer and
+# cold-start time on scale-to-zero platforms, and buys nothing.
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir .
+    && pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# No [dev]: pytest/ruff/mypy are CI concerns, not runtime ones.
+RUN pip install --no-cache-dir .
 
 # ── Runtime ───────────────────────────────────────
 FROM python:3.11-slim AS runtime

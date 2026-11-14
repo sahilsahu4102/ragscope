@@ -1,0 +1,4 @@
+# COPY . . would overwrite the image's Linux node_modules with the host's.
+node_modules/
+.next/
+.env*

@@ -1,28 +1,37 @@
 # Production overlay.
 #
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
 # The base compose file is a development setup: it bind-mounts the source tree,
 # runs uvicorn with --reload, and exposes Postgres and Redis on the host. Each
 # of those is wrong once the service is reachable from anywhere but localhost.
 #
-# Required environment (startup fails in production without them):
+# Compose MERGES list fields (ports, volumes) across files rather than replacing
+# them, so a plain `ports: []` here leaves the base file's ports published. The
+# !reset / !override tags (Compose >= 2.24) are what actually remove them.
+# Verify with: docker compose -f docker-compose.yml -f docker-compose.prod.yml config
+#
+# Caddy is the only thing published: it terminates TLS, serves the frontend,
+# and proxies /api/* to the backend with the API key injected server-side, so
+# the key never ships in the browser bundle.
+#
+# Required environment (in .env; startup fails without them):
 #   POSTGRES_PASSWORD   real password, not the dev sentinel
-#   API_KEY             or every endpoint is open
-#   CORS_ORIGINS        the deployed frontend origin
-#   APP_ENV=production  enables the startup safety check and disables /docs
+#   API_KEY             backend refuses to start in production without it
+#   DOMAIN              public hostname pointing at this host (for TLS)
 
 services:
   postgres:
     # No host port. Only other compose services need to reach the database;
     # publishing 5432 exposes it to the whole host network.
-    ports: []
+    ports: !reset []
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     restart: always
 
   redis:
-    ports: []
+    # Redis has no password: publishing 6379 is an open read/write cache.
+    ports: !reset []
     restart: always
     # Persistence matters here: Redis holds the semantic cache and the rate
     # limit counters. Losing the counters on restart lets a client reset its
@@ -34,22 +43,28 @@ services:
       --appendonly yes
 
   ollama:
-    ports: []
+    ports: !reset []
     restart: always
+    # Base file reserves an NVIDIA GPU, which fails to start on a CPU-only
+    # host. Delete this line on a GPU host with nvidia-container-toolkit.
+    deploy: !reset {}
 
   backend:
     restart: always
+    # Not published: Caddy reaches it over the compose network. Publishing it
+    # would also make TRUST_PROXY_HEADERS spoofable.
+    ports: !reset []
     # No source bind-mount: the image is the artifact. Mounting the working
     # tree over /app means the running code is whatever is on the host, which
     # defeats the point of building an image.
-    volumes:
+    volumes: !override
       - upload_data:/app/uploads
       - hf_cache:/home/ragscope/.cache/huggingface
     environment:
       APP_ENV: production
-      # Behind a load balancer that rewrites X-Forwarded-For. If the container
-      # is reachable directly, leave this false or clients can spoof the header
-      # to reset their rate limit.
+      # Caddy overwrites X-Forwarded-For with the real client IP. If the
+      # container is reachable directly, leave this false or clients can spoof
+      # the header to reset their rate limit.
       TRUST_PROXY_HEADERS: "true"
       LOG_LEVEL: INFO
       # 1.0 persists a trace plus every span for every query, forever. At even
@@ -67,7 +82,7 @@ services:
 
   celery-worker:
     restart: always
-    volumes:
+    volumes: !override
       - upload_data:/app/uploads
     environment:
       APP_ENV: production
@@ -78,6 +93,31 @@ services:
 
   frontend:
     restart: always
+    ports: !reset []
+    # The dev mounts would overlay the built standalone server with the source tree.
+    volumes: !reset []
     build:
       target: prod
-    command: npm run start
+      args:
+        # Inlined at build time. Relative: Caddy serves UI and API on one origin.
+        NEXT_PUBLIC_API_URL: /api/v1
+    command: node server.js
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN must be set}
+      API_KEY: ${API_KEY:?API_KEY must be set}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  caddy_data:

@@ -1,0 +1,14 @@
+# Used by docker-compose.prod.yml. Caddy fetches and renews the TLS cert for
+# $DOMAIN automatically; ports 80 and 443 must be reachable for that.
+
+{$DOMAIN} {
+	handle /api/* {
+		reverse_proxy backend:8000 {
+			# Set, not appended: a client-supplied X-API-Key is overwritten.
+			header_up X-API-Key {$API_KEY}
+		}
+	}
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

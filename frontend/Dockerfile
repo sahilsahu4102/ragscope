@@ -23,10 +23,15 @@ CMD ["npm", "run", "dev"]
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# NEXT_PUBLIC_* is inlined into the client bundle at build time; setting it at
+# runtime does nothing.
+ARG NEXT_PUBLIC_API_URL
 RUN npm run build
 
 FROM base AS prod
-ENV NODE_ENV=production
+# HOSTNAME: Docker sets it to the container id, and the standalone server binds to it.
+ENV NODE_ENV=production \
+    HOSTNAME=0.0.0.0
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
