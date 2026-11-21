@@ -4,6 +4,8 @@
 
 > Not another PDF chatbot — RAGScope rebuilds the core mechanics of LangSmith, Arize Phoenix, and Langfuse in one self-hosted platform, with hybrid retrieval, cross-encoder reranking, LLM-as-judge evaluation, OpenTelemetry tracing, and CI regression gates.
 
+🎥 **[Watch the demo video](https://drive.google.com/file/d/1BbxaNtz9l6BcQxCZ6Y-pBMMF-Sy2ylYu/view?usp=sharing)**
+
 ---
 
 ## Architecture
